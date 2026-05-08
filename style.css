@@ -146,9 +146,16 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   transition: width .08s linear;
 }
 
-.right { padding: 14px; overflow: auto; }
+.right { padding: 14px; display: flex; flex-direction: column; min-height: 0; }
 .right-head { display: flex; justify-content: space-between; color: var(--mute); margin-bottom: 10px; }
-#list { list-style: none; margin: 0; padding: 0; }
+#list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
 #list li {
   border: 1px solid transparent;
   border-radius: 10px;

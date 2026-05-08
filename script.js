@@ -264,10 +264,19 @@ function setModeIcon() {
 }
 
 function formatUploadDate(isoTime) {
-  if (!isoTime) return "上传时间未知";
-  const d = new Date(isoTime);
+  if (isoTime === null || isoTime === undefined || isoTime === "") return "日期未知";
+  let d;
+  if (typeof isoTime === "number") {
+    // jsDelivr sources may return seconds or milliseconds
+    d = new Date(isoTime < 1e12 ? isoTime * 1000 : isoTime);
+  } else if (/^\d+$/.test(String(isoTime).trim())) {
+    const n = Number(isoTime);
+    d = new Date(n < 1e12 ? n * 1000 : n);
+  } else {
+    d = new Date(isoTime);
+  }
   if (Number.isNaN(d.getTime())) return "上传时间未知";
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} 上传`;
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function ensureAnalyser() {
