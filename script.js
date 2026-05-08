@@ -9,61 +9,67 @@
 
 const AUDIO_EXTS = [".mp3", ".flac", ".wav", ".m4a", ".ogg"];
 const COVER_EXTS = ["jpg", "jpeg", "png", "webp"];
-const rawBase = `https://raw.githubusercontent.com/${CONFIG.user}/${CONFIG.repo}/${CONFIG.branch}`;
-const apiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/${CONFIG.musicFolder}`;
-const imgApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/${CONFIG.imgFolder}`;
-const cdnBase = `https://cdn.jsdelivr.net/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}`;
-const jsdIndexApi = `https://data.jsdelivr.com/v1/package/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}/flat`;
+const PLAY_MODES = ["list", "single", "shuffle"];
+const PLAY_MODE_ICON = { list: "🔁", single: "🔂", shuffle: "🔀" };
+const PLAY_MODE_TEXT = { list: "顺序", single: "单曲", shuffle: "随机" };
+
+const cdn = `https://cdn.jsdelivr.net/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}`;
+const flatApi = `https://data.jsdelivr.com/v1/package/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}/flat`;
 
 const DEFAULT_COVER =
   "data:image/svg+xml;charset=UTF-8," +
-  encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#111827"/></linearGradient></defs><rect width="500" height="500" fill="url(#g)"/><circle cx="250" cy="250" r="110" fill="#334155"/><circle cx="250" cy="250" r="28" fill="#cbd5e1"/><text x="250" y="420" text-anchor="middle" font-size="34" fill="#e2e8f0" font-family="Arial, sans-serif">MyMusic</text></svg>`);
+  encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#17233a"/><stop offset="100%" stop-color="#0a101a"/></linearGradient></defs><rect width="400" height="400" fill="url(#g)"/><circle cx="200" cy="200" r="90" fill="#334155"/><circle cx="200" cy="200" r="22" fill="#d9e3f3"/><text x="200" y="340" text-anchor="middle" font-size="26" fill="#ecf3ff" font-family="Arial">MyMusic</text></svg>`);
 
-const PLAY_MODES = ["list", "single", "shuffle"];
-const PLAY_MODE_LABEL = { list: "顺序", single: "单曲", shuffle: "随机" };
+const audio = document.getElementById("audio");
+const coverEl = document.getElementById("cover");
+const titleEl = document.getElementById("title");
+const listEl = document.getElementById("list");
+const lyricsEl = document.getElementById("lyrics");
+const progressEl = document.getElementById("progress");
+const volumeEl = document.getElementById("volume");
+const nowEl = document.getElementById("now");
+const totalEl = document.getElementById("total");
+const countEl = document.getElementById("count");
+const statusEl = document.getElementById("status");
+const modeBtn = document.getElementById("mode");
+const prevBtn = document.getElementById("prev");
+const playBtn = document.getElementById("play");
+const nextBtn = document.getElementById("next");
+const fullBtn = document.getElementById("btn-full");
+const stageEl = document.getElementById("lyrics-stage");
+const spectrumEl = document.getElementById("spectrum");
+const fontSelect = document.getElementById("font-select");
+const fontCustom = document.getElementById("font-custom");
+const fontApply = document.getElementById("font-apply");
 
 let playlist = [];
-let currentIndex = 0;
 let lrcLines = [];
-let activeLyricIndex = -1;
+let currentIndex = 0;
 let playMode = "list";
 let rafId = 0;
 let coverSet = new Set();
 let lrcMap = new Map();
 
-const audio = document.getElementById("audio-element");
-const musicListEl = document.getElementById("music-list");
-const lyricWrapper = document.getElementById("lyric-wrapper");
-const progressBar = document.getElementById("progress-bar");
-const volumeBar = document.getElementById("volume-bar");
-const btnPlay = document.getElementById("btn-play");
-const btnMode = document.getElementById("btn-mode");
-const statusText = document.getElementById("status-text");
-const btnLyricsFullscreen = document.getElementById("btn-lyrics-fullscreen");
+let audioCtx = null;
+let analyser = null;
+let sourceNode = null;
+let freqData = null;
 
-function fmtTime(sec) {
+function safeText(s) {
+  return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+function fmt(sec) {
   if (!Number.isFinite(sec) || sec < 0) return "00:00";
-  const s = Math.floor(sec % 60).toString().padStart(2, "0");
-  const m = Math.floor(sec / 60).toString().padStart(2, "0");
-  return `${m}:${s}`;
+  return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 }
-
-function safeText(text) {
-  return text.replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+function baseName(fileName) {
+  const i = fileName.lastIndexOf(".");
+  return i > 0 ? fileName.slice(0, i) : fileName;
 }
-
-function baseNameFromFile(fileName) {
-  const ext = fileName.lastIndexOf(".");
-  return ext > 0 ? fileName.slice(0, ext) : fileName;
+function normalizeName(s) {
+  return String(s).normalize("NFKC").toLowerCase().replace(/\s+/g, "").replace(/[·•\-_/\\()[\]{}【】「」'"`~!@#$%^&*+=|;:,.<>?，。！？：；（）]/g, "");
 }
-
-function normalizeTrackName(name) {
-  return name
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[·•\-_/\\()[\]{}【】「」"'`,.，。！？!?:：；;]/g, "");
-}
+function setStatus(msg) { statusEl.textContent = msg; }
 
 function parseLrc(text) {
   const parsed = text
@@ -71,200 +77,179 @@ function parseLrc(text) {
     .flatMap((line) => {
       const content = line.replace(/\[[^\]]*\]/g, "").trim();
       const tags = [...line.matchAll(/\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]/g)];
-      return tags.map((tag) => ({
-        time: Number(tag[1]) * 60 + Number(tag[2]),
-        text: content || "..."
-      }));
+      return tags.map((m) => ({ time: Number(m[1]) * 60 + Number(m[2]), text: content || "..." }));
     })
-    .filter((v) => Number.isFinite(v.time))
+    .filter((x) => Number.isFinite(x.time))
     .sort((a, b) => a.time - b.time);
 
   if (!parsed.length) return parsed;
-  const shift = parsed[0].time;
-  if (shift > 1) {
-    return parsed.map((line) => ({ ...line, time: Math.max(0, line.time - shift) }));
-  }
-  return parsed;
+  const offset = parsed[0].time;
+  return offset > 1 ? parsed.map((x) => ({ ...x, time: Math.max(0, x.time - offset) })) : parsed;
 }
 
-async function fetchCoverIndex() {
-  if (coverSet.size) return;
-  try {
-    const response = await fetch(jsdIndexApi);
-    if (!response.ok) throw new Error("jsDelivr index unavailable");
-    const data = await response.json();
-    coverSet = new Set(
-      (data.files || [])
-        .map((f) => f.name)
-        .filter((name) => name.startsWith(`/${CONFIG.imgFolder}/`))
-        .map((name) => name.slice(name.lastIndexOf("/") + 1).toLowerCase())
-    );
-    if (coverSet.size) return;
-  } catch {
-    // fallback to GitHub API when jsDelivr index is unavailable
-  }
-
-  try {
-    const response = await fetch(imgApiBase);
-    if (!response.ok) return;
-    const files = await response.json();
-    coverSet = new Set(files.filter((file) => file.type === "file").map((file) => file.name.toLowerCase()));
-  } catch {
-    coverSet = new Set();
-  }
+async function fetchIndex() {
+  const res = await fetch(flatApi);
+  if (!res.ok) throw new Error(`索引拉取失败 ${res.status}`);
+  const data = await res.json();
+  return data.files || [];
 }
 
-function resolveCover(baseName) {
-  const candidates = [`${baseName}-cover`, baseName];
-  for (const ext of COVER_EXTS) {
-    for (const fileBase of candidates) {
-      const fileName = `${fileBase}.${ext}`;
-      if (coverSet.has(fileName.toLowerCase())) {
-        return `${cdnBase}/${CONFIG.imgFolder}/${encodeURIComponent(fileName)}`;
-      }
+function buildLookup(files) {
+  coverSet = new Set();
+  lrcMap = new Map();
+
+  files.forEach((f) => {
+    const p = f.name || "";
+    if (p.startsWith(`/${CONFIG.imgFolder}/`)) {
+      coverSet.add(p.slice(p.lastIndexOf("/") + 1).toLowerCase());
+    }
+    if (p.startsWith(`/${CONFIG.lrcFolder}/`) && p.toLowerCase().endsWith(".lrc")) {
+      const fn = p.slice(p.lastIndexOf("/") + 1);
+      lrcMap.set(normalizeName(baseName(fn)), fn);
+    }
+  });
+}
+
+function resolveCover(songBase) {
+  for (const prefix of [`${songBase}-cover`, songBase]) {
+    for (const ext of COVER_EXTS) {
+      const fn = `${prefix}.${ext}`;
+      if (coverSet.has(fn.toLowerCase())) return `${cdn}/${CONFIG.imgFolder}/${encodeURIComponent(fn)}`;
     }
   }
   return DEFAULT_COVER;
 }
 
-async function fetchLrcIndex() {
-  lrcMap = new Map();
-  try {
-    const response = await fetch(jsdIndexApi);
-    if (!response.ok) return;
-    const data = await response.json();
-    const lrcPrefix = `/${CONFIG.lrcFolder}/`;
-    (data.files || [])
-      .map((f) => f.name)
-      .filter((name) => name.startsWith(lrcPrefix) && name.toLowerCase().endsWith(".lrc"))
-      .forEach((name) => {
-        const fileName = name.slice(name.lastIndexOf("/") + 1);
-        const base = baseNameFromFile(fileName);
-        lrcMap.set(normalizeTrackName(base), fileName);
-      });
-  } catch {
-    lrcMap = new Map();
-  }
+function resolveLrc(songBase) {
+  const hit = lrcMap.get(normalizeName(songBase));
+  const fn = hit || `${songBase}.lrc`;
+  return `${cdn}/${CONFIG.lrcFolder}/${encodeURIComponent(fn)}`;
 }
 
-function resolveLyricsUrl(songBase) {
-  const normalized = normalizeTrackName(songBase);
-  const matched = lrcMap.get(normalized);
-  if (matched) return `${cdnBase}/${CONFIG.lrcFolder}/${encodeURIComponent(matched)}`;
-  return `${cdnBase}/${CONFIG.lrcFolder}/${encodeURIComponent(songBase)}.lrc`;
-}
-
-async function fetchMusicFiles() {
-  try {
-    const response = await fetch(jsdIndexApi);
-    if (!response.ok) throw new Error("jsDelivr index unavailable");
-    const data = await response.json();
-    const musPrefix = `/${CONFIG.musicFolder}/`;
-    return (data.files || [])
-      .map((f) => f.name)
-      .filter((name) => name.startsWith(musPrefix))
-      .map((name) => name.slice(name.lastIndexOf("/") + 1))
-      .filter((name) => AUDIO_EXTS.some((ext) => name.toLowerCase().endsWith(ext)))
-      .map((name) => ({ name, type: "file" }));
-  } catch {
-    const response = await fetch(apiBase);
-    if (!response.ok) {
-      throw new Error(`GitHub API 访问失败: ${response.status}（可能是限流，稍后再试）`);
-    }
-    return await response.json();
-  }
-}
-
-function setStatus(text) {
-  statusText.textContent = text;
-}
-
-function setPlayButtonState(paused) {
-  btnPlay.innerHTML = `<span aria-hidden="true">${paused ? "▶" : "⏸"}</span>`;
-  btnPlay.setAttribute("aria-label", paused ? "播放" : "暂停");
-  btnPlay.setAttribute("data-tip", paused ? "播放" : "暂停");
-}
-
-function setModeButtonState() {
-  const modeIcon = { list: "🔁", single: "🔂", shuffle: "🔀" }[playMode];
-  btnMode.innerHTML = `<span aria-hidden="true">${modeIcon}</span>`;
-  btnMode.setAttribute("aria-label", `播放模式：${PLAY_MODE_LABEL[playMode]}`);
-  btnMode.setAttribute("data-tip", `播放模式：${PLAY_MODE_LABEL[playMode]}`);
-}
-
-function renderPlaylist() {
-  musicListEl.innerHTML = playlist
-    .map((song, i) => `<li data-index="${i}" class="${i === currentIndex ? "active" : ""}">${safeText(song.name)}</li>`)
+function renderList() {
+  listEl.innerHTML = playlist
+    .map((s, i) => `<li data-i="${i}" class="${i === currentIndex ? "active" : ""}">${safeText(s.name)}</li>`)
     .join("");
-  document.getElementById("song-count").textContent = `${playlist.length} 首`;
+  countEl.textContent = String(playlist.length);
 }
 
 function renderLyrics() {
   if (!lrcLines.length) {
-    lyricWrapper.innerHTML = "<p>暂无歌词</p>";
+    lyricsEl.innerHTML = "<p>暂无歌词</p>";
     return;
   }
-  const intro = `<p><span class="lyric-line"><span class="line">♪ 前奏 ♪</span><span class="fill">♪ 前奏 ♪</span></span></p>`;
-  lyricWrapper.innerHTML = intro + lrcLines
-    .map((line) => `<p><span class="lyric-line"><span class="line">${safeText(line.text)}</span><span class="fill">${safeText(line.text)}</span></span></p>`)
+  lyricsEl.innerHTML = lrcLines
+    .map((l) => `<p><span class="lyric-line"><span class="base">${safeText(l.text)}</span><span class="fill">${safeText(l.text)}</span></span></p>`)
     .join("");
 }
 
-function updateLyricFlow() {
+function updateLyrics() {
   if (!lrcLines.length) return;
-  const cur = audio.currentTime;
+  const t = audio.currentTime;
   let idx = -1;
   for (let i = 0; i < lrcLines.length; i += 1) {
-    if (cur >= lrcLines[i].time) idx = i;
+    if (t >= lrcLines[i].time) idx = i;
     else break;
   }
-  if (idx === -1) return;
+  if (idx < 0) return;
 
-  const items = lyricWrapper.querySelectorAll("p");
-  items.forEach((el) => el.classList.remove("active"));
-  lyricWrapper.querySelectorAll(".fill").forEach((fillEl, i) => {
-    fillEl.style.width = i <= idx ? "100%" : "0%";
+  const ps = lyricsEl.querySelectorAll("p");
+  ps.forEach((p) => p.classList.remove("active"));
+  ps.forEach((p, i) => {
+    const fill = p.querySelector(".fill");
+    if (!fill) return;
+    if (i < idx) fill.style.width = "100%";
+    if (i > idx) fill.style.width = "0%";
   });
-  if (items[idx + 1]) {
-    items[idx + 1].classList.add("active");
-    lyricWrapper.style.transform = `translateY(${-(idx + 1) * 56 + 170}px)`;
-  }
-  activeLyricIndex = idx;
 
-  const item = lyricWrapper.querySelectorAll("p")[idx + 1];
-  if (!item) return;
-  const fill = item.querySelector(".fill");
-  const txt = lrcLines[idx].text || "";
+  const p = ps[idx];
+  if (!p) return;
+  p.classList.add("active");
+
   const start = lrcLines[idx].time;
   const end = lrcLines[idx + 1] ? lrcLines[idx + 1].time : start + 3;
-  const duration = Math.max(0.6, end - start);
-  const ratio = Math.max(0, Math.min(1, (cur - start) / duration));
-  fill.style.width = `${ratio * 100}%`;
+  const ratio = Math.max(0, Math.min(1, (t - start) / Math.max(0.5, end - start)));
+  const fill = p.querySelector(".fill");
+  if (fill) fill.style.width = `${ratio * 100}%`;
+
+  const lineHeight = window.innerWidth < 1100 ? 50 : 56;
+  lyricsEl.style.transform = `translateY(${-idx * lineHeight + (window.innerWidth < 1100 ? 140 : 180)}px)`;
 }
 
-function stepFrame() {
+function setPlayIcon(paused) {
+  playBtn.textContent = paused ? "▶" : "⏸";
+  playBtn.setAttribute("data-tip", paused ? "播放" : "暂停");
+}
+function setModeIcon() {
+  modeBtn.textContent = PLAY_MODE_ICON[playMode];
+  modeBtn.setAttribute("data-tip", PLAY_MODE_TEXT[playMode]);
+}
+
+function ensureAnalyser() {
+  if (audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audioCtx = new AC();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.82;
+  sourceNode = audioCtx.createMediaElementSource(audio);
+  sourceNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+}
+
+function drawSpectrum() {
+  const ctx = spectrumEl.getContext("2d");
+  if (!ctx) return;
+  const w = spectrumEl.clientWidth;
+  const h = spectrumEl.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  if (spectrumEl.width !== Math.floor(w * dpr) || spectrumEl.height !== Math.floor(h * dpr)) {
+    spectrumEl.width = Math.floor(w * dpr);
+    spectrumEl.height = Math.floor(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!analyser || !freqData) return;
+
+  analyser.getByteFrequencyData(freqData);
+  const bars = Math.min(58, freqData.length);
+  const barW = w / bars;
+  for (let i = 0; i < bars; i += 1) {
+    const val = freqData[i + 2] / 255;
+    const bh = Math.max(2, val * h);
+    const x = i * barW;
+    const y = h - bh;
+    ctx.fillStyle = "rgba(237,244,255,.88)";
+    ctx.fillRect(x + 1, y, Math.max(1, barW - 2), bh);
+  }
+}
+
+function loop() {
   const cur = audio.currentTime || 0;
   const total = audio.duration || 0;
-  progressBar.value = total ? (cur / total) * 100 : 0;
-  document.getElementById("current-time").textContent = fmtTime(cur);
-  document.getElementById("total-time").textContent = fmtTime(total);
-  updateLyricFlow();
-  rafId = requestAnimationFrame(stepFrame);
+  nowEl.textContent = fmt(cur);
+  totalEl.textContent = fmt(total);
+  progressEl.value = total ? (cur / total) * 100 : 0;
+  updateLyrics();
+  drawSpectrum();
+  rafId = requestAnimationFrame(loop);
 }
 
-function stopFrame() {
+function stopLoop() {
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
 }
 
-function pickNextIndex() {
+function nextIndex() {
   if (!playlist.length) return 0;
   if (playMode === "single") return currentIndex;
   if (playMode === "shuffle") {
     if (playlist.length === 1) return currentIndex;
-    let next = currentIndex;
-    while (next === currentIndex) next = Math.floor(Math.random() * playlist.length);
-    return next;
+    let n = currentIndex;
+    while (n === currentIndex) n = Math.floor(Math.random() * playlist.length);
+    return n;
   }
   return (currentIndex + 1) % playlist.length;
 }
@@ -277,159 +262,206 @@ async function fetchLyrics(url) {
     renderLyrics();
   } catch {
     lrcLines = [];
-    lyricWrapper.innerHTML = "<p>暂无歌词</p>";
+    lyricsEl.innerHTML = "<p>暂无歌词</p>";
   }
-  activeLyricIndex = -1;
-  lyricWrapper.style.transform = "translateY(0)";
+  lyricsEl.style.transform = "translateY(0)";
 }
 
 async function loadSong(index, autoplay = true) {
   if (!playlist.length) return;
   currentIndex = (index + playlist.length) % playlist.length;
   const song = playlist[currentIndex];
-
   audio.src = song.url;
-  document.getElementById("current-title").textContent = song.name;
-  const coverUrl = resolveCover(song.name);
-  document.getElementById("current-cover").src = coverUrl;
-  document.getElementById("bg-blur").style.backgroundImage = `url(${coverUrl})`;
-  await fetchLyrics(song.lrc);
-  renderPlaylist();
+  titleEl.textContent = song.name;
+  coverEl.src = resolveCover(song.name);
 
-  if (autoplay) {
-    try {
-      await audio.play();
-      setPlayButtonState(false);
-      setStatus(`正在播放：${song.name}`);
-    } catch {
-      setPlayButtonState(true);
-      setStatus("浏览器阻止自动播放，请点击播放");
-    }
-  } else {
-    setPlayButtonState(true);
+  await fetchLyrics(song.lrc);
+  renderList();
+
+  if (!autoplay) {
+    setPlayIcon(true);
     setStatus(`已加载：${song.name}`);
+    return;
+  }
+
+  try {
+    ensureAnalyser();
+    if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
+    await audio.play();
+    setPlayIcon(false);
+    setStatus(`正在播放：${song.name}`);
+  } catch {
+    setPlayIcon(true);
+    setStatus("点击播放开始");
   }
 }
 
-async function fetchPlaylist() {
-  setStatus("正在拉取 GitHub 音乐列表...");
-  lyricWrapper.innerHTML = "<p>正在拉取 GitHub 音乐列表...</p>";
+async function loadPlaylist() {
+  setStatus("正在加载资源...");
   try {
-    await fetchCoverIndex();
-    await fetchLrcIndex();
-    const files = await fetchMusicFiles();
+    const files = await fetchIndex();
+    buildLookup(files);
+
+    const prefix = `/${CONFIG.musicFolder}/`;
     playlist = files
-      .filter((file) => file.type === "file" && AUDIO_EXTS.some((ext) => file.name.toLowerCase().endsWith(ext)))
-      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
-      .map((file) => {
-        const songBase = baseNameFromFile(file.name);
+      .map((f) => f.name)
+      .filter((p) => p.startsWith(prefix))
+      .map((p) => p.slice(p.lastIndexOf("/") + 1))
+      .filter((n) => AUDIO_EXTS.some((ext) => n.toLowerCase().endsWith(ext)))
+      .sort((a, b) => a.localeCompare(b, "zh-CN"))
+      .map((fn) => {
+        const b = baseName(fn);
         return {
-          name: songBase,
-          url: `${cdnBase}/${CONFIG.musicFolder}/${encodeURIComponent(file.name)}`,
-          lrc: resolveLyricsUrl(songBase)
+          name: b,
+          url: `${cdn}/${CONFIG.musicFolder}/${encodeURIComponent(fn)}`,
+          lrc: resolveLrc(b)
         };
       });
 
-    renderPlaylist();
+    renderList();
     if (!playlist.length) {
-      setStatus("未发现可播放音频，请检查 mus/ 目录");
-      lyricWrapper.innerHTML = "<p>未发现可播放音频，请检查 mus/ 目录。</p>";
+      setStatus("mus 目录没有音频");
+      lyricsEl.innerHTML = "<p>没有找到可播放音乐</p>";
       return;
     }
     await loadSong(0, false);
-  } catch (error) {
-    console.error(error);
-    setStatus(error.message);
-    lyricWrapper.innerHTML = `<p>拉取失败：${safeText(error.message)}</p>`;
+  } catch (e) {
+    console.error(e);
+    setStatus(e?.message || "加载失败");
+    lyricsEl.innerHTML = `<p>拉取失败：${safeText(e?.message || "未知错误")}</p>`;
   }
 }
 
-function updateClock() {
-  const now = new Date();
-  document.getElementById("clock-time").textContent = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  document.getElementById("clock-date").textContent = now.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit", weekday: "short" });
+function setupFonts() {
+  const preferred = [
+    "LXGW WenKai", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Arial"
+  ];
+  const available = [];
+  if (document.fonts && typeof document.fonts.check === "function") {
+    preferred.forEach((f) => {
+      if (document.fonts.check(`16px '${f}'`)) available.push(f);
+    });
+  }
+
+  ["系统默认", ...available].forEach((f) => {
+    const op = document.createElement("option");
+    op.value = f;
+    op.textContent = f;
+    fontSelect.appendChild(op);
+  });
+
+  const saved = localStorage.getItem("mymusic_font") || "系统默认";
+  fontSelect.value = saved;
+  if (saved !== "系统默认") {
+    document.documentElement.style.setProperty("--lyric-font", `'${saved}', 'PingFang SC', 'Microsoft YaHei', sans-serif`);
+  }
 }
 
-musicListEl.addEventListener("click", async (event) => {
-  const target = event.target.closest("li[data-index]");
-  if (!target) return;
-  await loadSong(Number(target.dataset.index), true);
+function applyFont(name) {
+  if (!name || name === "系统默认") {
+    localStorage.removeItem("mymusic_font");
+    document.documentElement.style.setProperty("--lyric-font", `"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`);
+    setStatus("已切回系统默认字体");
+    return;
+  }
+  document.documentElement.style.setProperty("--lyric-font", `'${name}', 'PingFang SC', 'Microsoft YaHei', sans-serif`);
+  localStorage.setItem("mymusic_font", name);
+  setStatus(`已切换字体：${name}`);
+}
+
+listEl.addEventListener("click", async (e) => {
+  const li = e.target.closest("li[data-i]");
+  if (!li) return;
+  await loadSong(Number(li.dataset.i), true);
 });
 
-document.getElementById("btn-prev").addEventListener("click", () => loadSong(currentIndex - 1, true));
-document.getElementById("btn-next").addEventListener("click", () => loadSong(pickNextIndex(), true));
+prevBtn.addEventListener("click", () => loadSong(currentIndex - 1, true));
+nextBtn.addEventListener("click", () => loadSong(nextIndex(), true));
 
-btnPlay.addEventListener("click", async () => {
+playBtn.addEventListener("click", async () => {
   if (!audio.src) return;
+  ensureAnalyser();
+  if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
   if (audio.paused) {
     await audio.play();
-    setPlayButtonState(false);
+    setPlayIcon(false);
     setStatus("播放中");
   } else {
     audio.pause();
-    setPlayButtonState(true);
+    setPlayIcon(true);
     setStatus("已暂停");
   }
 });
 
-btnMode.addEventListener("click", () => {
-  const idx = PLAY_MODES.indexOf(playMode);
-  playMode = PLAY_MODES[(idx + 1) % PLAY_MODES.length];
-  setModeButtonState();
-  setStatus(`播放模式：${PLAY_MODE_LABEL[playMode]}`);
+modeBtn.addEventListener("click", () => {
+  const i = PLAY_MODES.indexOf(playMode);
+  playMode = PLAY_MODES[(i + 1) % PLAY_MODES.length];
+  setModeIcon();
+  setStatus(`播放模式：${PLAY_MODE_TEXT[playMode]}`);
 });
 
-progressBar.addEventListener("input", () => {
+progressEl.addEventListener("input", () => {
   if (!audio.duration) return;
-  audio.currentTime = (progressBar.value / 100) * audio.duration;
+  audio.currentTime = (Number(progressEl.value) / 100) * audio.duration;
 });
 
-volumeBar.addEventListener("input", () => {
-  audio.volume = Number(volumeBar.value);
-});
-
-audio.addEventListener("play", () => {
-  setPlayButtonState(false);
-  if (!rafId) stepFrame();
-});
-
-audio.addEventListener("pause", () => {
-  setPlayButtonState(true);
-  stopFrame();
+volumeEl.addEventListener("input", () => {
+  audio.volume = Number(volumeEl.value);
 });
 
 audio.addEventListener("loadedmetadata", () => {
-  document.getElementById("total-time").textContent = fmtTime(audio.duration);
+  totalEl.textContent = fmt(audio.duration);
 });
+audio.addEventListener("play", () => {
+  setPlayIcon(false);
+  if (!rafId) loop();
+});
+audio.addEventListener("pause", () => {
+  setPlayIcon(true);
+  stopLoop();
+});
+audio.addEventListener("ended", () => loadSong(nextIndex(), true));
+audio.addEventListener("error", () => setStatus("音频加载失败"));
 
-audio.addEventListener("ended", () => loadSong(pickNextIndex(), true));
-audio.addEventListener("error", () => setStatus("音频加载失败，请检查文件路径和格式"));
-
-btnLyricsFullscreen.addEventListener("click", async () => {
+fullBtn.addEventListener("click", async () => {
   try {
-    if (!document.fullscreenElement) {
-      await document.getElementById("lyrics-view").requestFullscreen();
-      btnLyricsFullscreen.setAttribute("data-tip", "退出全屏");
-      btnLyricsFullscreen.innerHTML = `<span aria-hidden="true">🡼</span>`;
-    } else {
-      await document.exitFullscreen();
-    }
+    if (!document.fullscreenElement) await stageEl.requestFullscreen();
+    else await document.exitFullscreen();
   } catch {
-    setStatus("当前浏览器不支持歌词全屏");
+    setStatus("当前浏览器不支持全屏");
   }
 });
 
 document.addEventListener("fullscreenchange", () => {
-  const inFullscreen = !!document.fullscreenElement;
-  btnLyricsFullscreen.setAttribute("data-tip", inFullscreen ? "退出全屏" : "歌词全屏");
-  btnLyricsFullscreen.setAttribute("aria-label", inFullscreen ? "退出全屏" : "歌词全屏");
-  btnLyricsFullscreen.innerHTML = `<span aria-hidden="true">${inFullscreen ? "🡼" : "⛶"}</span>`;
+  const on = !!document.fullscreenElement;
+  fullBtn.textContent = on ? "🡼" : "⛶";
+  fullBtn.setAttribute("data-tip", on ? "退出全屏" : "歌词全屏");
 });
 
-updateClock();
-setInterval(updateClock, 1000);
-setModeButtonState();
-setPlayButtonState(true);
-document.getElementById("current-cover").src = DEFAULT_COVER;
+fontSelect.addEventListener("change", () => applyFont(fontSelect.value));
+fontApply.addEventListener("click", () => {
+  const f = fontCustom.value.trim();
+  if (!f) return;
+  if (![...fontSelect.options].some((o) => o.value === f)) {
+    const op = document.createElement("option");
+    op.value = f;
+    op.textContent = f;
+    fontSelect.appendChild(op);
+  }
+  fontSelect.value = f;
+  applyFont(f);
+});
+
+function tickClock() {
+  const now = new Date();
+  document.getElementById("artist").textContent = now.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) + " · Neon Radio";
+}
+
+setupFonts();
+setModeIcon();
+setPlayIcon(true);
+coverEl.src = DEFAULT_COVER;
 audio.volume = 1;
-fetchPlaylist();
+tickClock();
+setInterval(tickClock, 60000);
+loadPlaylist();

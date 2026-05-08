@@ -1,63 +1,68 @@
 ﻿<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MyMusic Player</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23111827'/%3E%3Ccircle cx='50' cy='50' r='20' fill='%23e2e8f0'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MyMusic Neon Player</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="bg" id="bg-blur"></div>
-  <div id="app">
-    <aside class="left panel">
-      <img id="current-cover" alt="cover" class="cover">
-      <h1 id="current-title">未播放</h1>
-      <p id="current-artist">MyMusic</p>
-      <div class="meta-row">
-        <span id="clock-time">00:00</span>
-        <span id="clock-date">--</span>
+  <div class="noise"></div>
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+
+  <div class="layout">
+    <aside class="panel left">
+      <div class="brand">MYMUSIC</div>
+      <img id="cover" class="cover" alt="cover" />
+      <h1 id="title">等待播放</h1>
+      <p id="artist">Personal Radio</p>
+
+      <div class="font-box">
+        <label for="font-select">歌词字体</label>
+        <select id="font-select"></select>
+        <input id="font-custom" type="text" placeholder="输入字体名并应用" />
+        <button id="font-apply">应用字体</button>
       </div>
-      <div class="hint">从 GitHub 的 <code>mus/ lrc/ img/</code> 自动拉取歌曲、歌词和封面</div>
     </aside>
 
-    <main class="center panel">
-      <button id="btn-lyrics-fullscreen" class="icon-btn top-right" type="button" aria-label="歌词全屏" data-tip="歌词全屏">
-        <span aria-hidden="true">⛶</span>
-      </button>
-      <div class="lyrics" id="lyrics-view">
-        <div id="lyric-wrapper"><p>正在加载...</p></div>
+    <main class="panel center" id="lyrics-stage">
+      <button id="btn-full" class="icon" data-tip="歌词全屏" aria-label="歌词全屏">⛶</button>
+      <div class="lyrics-mask">
+        <div id="lyrics"><p>正在加载歌曲...</p></div>
       </div>
     </main>
 
-    <aside class="right panel">
-      <div class="list-head">
-        <strong>播放列表</strong>
-        <span id="song-count">0 首</span>
+    <aside class="panel right">
+      <div class="right-head">
+        <strong>Playlist</strong>
+        <span id="count">0</span>
       </div>
-      <ul id="music-list"></ul>
+      <ul id="list"></ul>
     </aside>
 
-    <footer class="bottom panel">
-      <div class="time-row">
-        <span id="current-time">00:00</span>
-        <input type="range" id="progress-bar" min="0" max="100" step="0.1" value="0">
-        <span id="total-time">00:00</span>
+    <footer class="panel bottom">
+      <canvas id="spectrum" height="64"></canvas>
+
+      <div class="timeline">
+        <span id="now">00:00</span>
+        <input id="progress" type="range" min="0" max="100" step="0.1" value="0" />
+        <span id="total">00:00</span>
       </div>
-      <div class="control-row">
-        <button id="btn-mode" type="button" class="icon-btn" aria-label="顺序播放" data-tip="顺序播放"><span aria-hidden="true">🔁</span></button>
-        <button id="btn-prev" type="button" class="icon-btn" aria-label="上一首" data-tip="上一首"><span aria-hidden="true">⏮</span></button>
-        <button id="btn-play" type="button" class="icon-btn primary" aria-label="播放" data-tip="播放"><span aria-hidden="true">▶</span></button>
-        <button id="btn-next" type="button" class="icon-btn" aria-label="下一首" data-tip="下一首"><span aria-hidden="true">⏭</span></button>
-        <label class="volume-wrap">音量
-          <input type="range" id="volume-bar" min="0" max="1" step="0.01" value="1">
-        </label>
+
+      <div class="controls">
+        <button id="mode" class="icon" data-tip="顺序">🔁</button>
+        <button id="prev" class="icon" data-tip="上一首">⏮</button>
+        <button id="play" class="icon primary" data-tip="播放">▶</button>
+        <button id="next" class="icon" data-tip="下一首">⏭</button>
+        <label class="vol">Vol<input id="volume" type="range" min="0" max="1" step="0.01" value="1" /></label>
       </div>
-      <div id="status-text">准备就绪</div>
+
+      <p id="status">准备就绪</p>
     </footer>
   </div>
 
-  <audio id="audio-element" preload="metadata"></audio>
+  <audio id="audio" preload="metadata"></audio>
   <script src="script.js"></script>
 </body>
 </html>
