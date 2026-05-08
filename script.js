@@ -352,16 +352,21 @@ function drawSpectrum() {
   analyser.getByteFrequencyData(freqData);
   if (spectrumSmooth.length !== half) spectrumSmooth = new Array(half).fill(0);
   gradientPhase += 0.0025;
+  let energySum = 0;
+  for (let i = 0; i < freqData.length; i += 1) energySum += freqData[i];
+  const globalEnergy = energySum / (freqData.length * 255);
   for (let i = 0; i < half; i += 1) {
     const pos = half <= 1 ? 0 : i / (half - 1);
-    const mapped = Math.pow(pos, 1.5); // spread low-mid frequencies across the full width
+    const mapped = Math.pow(pos, 1.15); // wider mapping so far-left/right also receive activity
     const binIndex = Math.min(freqData.length - 1, Math.floor(mapped * (freqData.length - 1)));
     const raw = freqData[binIndex] / 255;
-    const lifted = raw * 0.88 + (1 - pos) * 0.12; // keep both sides alive while center remains stronger
-    const boosted = Math.pow(Math.max(0, Math.min(1, lifted)), 0.58);
-    spectrumSmooth[i] = spectrumSmooth[i] * 0.68 + boosted * 0.32;
-    const minBar = h * 0.09;
-    const bh = Math.max(minBar, spectrumSmooth[i] * h);
+    const sidePulse = 0.08 + 0.08 * (Math.sin(gradientPhase * 8 + i * 0.24) * 0.5 + 0.5);
+    const lifted = raw * 0.88 + sidePulse * 0.12;
+    const boosted = Math.pow(Math.max(0, Math.min(1, lifted)), 0.54);
+    spectrumSmooth[i] = spectrumSmooth[i] * 0.64 + boosted * 0.36;
+    const edgeWeight = Math.pow(pos, 0.8);
+    const dynamicFloor = h * (0.06 + 0.10 * globalEnergy + 0.12 * edgeWeight);
+    const bh = Math.max(dynamicFloor, spectrumSmooth[i] * h);
     const xLeft = (half - 1 - i) * (barW + gap);
     const xRight = (half + i) * (barW + gap);
     const y = h - bh;
@@ -444,7 +449,7 @@ async function loadSong(index, autoplay = true) {
   audio.currentTime = 0;
   titleEl.textContent = song.name;
   coverEl.src = resolveCover(song.name);
-  document.getElementById("artist").textContent = formatUploadDate(song.uploadedAt);
+  document.getElementById("artist").textContent = "";
 
   await fetchLyrics(song.lrcUrl);
   resetLyricsToStart();

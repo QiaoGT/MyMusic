@@ -65,7 +65,7 @@ body {
 .brand { letter-spacing: 0.22em; font-size: 0.78rem; color: #9eb4d9; }
 .cover { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 14px; border: 1px solid var(--line); }
 h1 { margin: 4px 0 0; font-size: 1.25rem; }
-#artist { margin: 0; color: var(--mute); }
+#artist { display: none; }
 .side-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 6px; }
 .mini-timeline {
   grid-column: 1 / 5;
