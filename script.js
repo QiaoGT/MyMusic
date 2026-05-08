@@ -387,7 +387,8 @@ function ensureAnalyser() {
 }
 
 function drawSpectrum() {
-  drawSpectrumOn(spectrumEl, 1, 1.7);
+  // Keep non-fullscreen spectrum as previous behavior.
+  drawSpectrumOn(spectrumEl, 1, 1);
   if (document.fullscreenElement === stageEl) {
     const dimmed = stageEl.classList.contains("spectrum-dim");
     drawSpectrumOn(fullscreenSpectrumEl, dimmed ? 0.72 : 1, 1.7);
@@ -440,15 +441,18 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
 
   for (let i = 0; i < half; i += 1) {
     const pos = half <= 1 ? 0 : i / (half - 1);
-    const mapped = Math.pow(pos, 1.15);
+    const mapped = Math.pow(pos, 0.95);
     const binIndex = Math.min(freqData.length - 1, Math.floor(mapped * (freqData.length - 1)));
     const raw = freqData[binIndex] / 255;
+    const nextRaw = freqData[Math.min(freqData.length - 1, binIndex + 1)] / 255;
+    const prevRaw = freqData[Math.max(0, binIndex - 1)] / 255;
+    const localEnergy = (raw + nextRaw + prevRaw) / 3;
     const sidePulse = 0.08 + 0.08 * (Math.sin(gradientPhase * 8 + i * 0.24) * 0.5 + 0.5);
-    const lifted = raw * 0.88 + sidePulse * 0.12;
+    const lifted = localEnergy * 0.78 + globalEnergy * 0.16 + sidePulse * 0.06;
     const boosted = Math.pow(Math.max(0, Math.min(1, lifted)), 0.54);
     spectrumSmooth[i] = spectrumSmooth[i] * 0.64 + boosted * 0.36;
     const edgeWeight = Math.pow(pos, 0.8);
-    const dynamicFloor = h * (0.06 + 0.10 * globalEnergy + 0.12 * edgeWeight);
+    const dynamicFloor = h * (0.04 + 0.08 * globalEnergy + 0.09 * edgeWeight);
     const bh = Math.max(dynamicFloor, Math.min(h, spectrumSmooth[i] * h * ampBoost));
     const xLeft = (half - 1 - i) * (barW + gap);
     const xRight = (half + i) * (barW + gap);
@@ -802,7 +806,7 @@ async function transcodeToMp4(inputBlob) {
   const data = engine.FS("readFile", "output.mp4");
   engine.FS("unlink", "input.webm");
   engine.FS("unlink", "output.mp4");
-  return new Blob([data.buffer], { type: "video/mp4" });
+  return new Blob([data.buffer.slice(0)], { type: "video/mp4" });
 }
 
 function startRecording() {
@@ -844,6 +848,7 @@ function startRecording() {
 
     try {
       let finalBlob = rawBlob;
+      // Force MP4 output path even when browser records WebM.
       if (!(recorder.mimeType || "").includes("mp4")) {
         recordStatusEl.textContent = "转码MP4中，请稍候...";
         finalBlob = await transcodeToMp4(rawBlob);
