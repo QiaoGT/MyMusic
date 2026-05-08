@@ -935,6 +935,7 @@ async function checkAuthRequired() {
   } catch {
     return false;
   }
+}
 
 async function verifyPassword(password) {
   try {
