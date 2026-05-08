@@ -418,7 +418,7 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
     const boosted = Math.pow(Math.max(0, Math.min(1, lifted)), 0.54);
     spectrumSmooth[i] = spectrumSmooth[i] * 0.64 + boosted * 0.36;
     const edgeWeight = Math.pow(pos, 0.8);
-    const dynamicFloor = h * (0.04 + 0.08 * globalEnergy + 0.09 * edgeWeight);
+    const dynamicFloor = h * (0.09 + 0.08 * globalEnergy + 0.14 * edgeWeight);
     const bh = Math.max(dynamicFloor, Math.min(h, spectrumSmooth[i] * h * ampBoost));
     heights[i] = bh;
   }
@@ -433,7 +433,9 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
   }
 
   for (let i = 0; i < half; i += 1) {
-    const bh = Math.min(h, heights[i]);
+    const pos = half <= 1 ? 0 : i / (half - 1); // 0 center, 1 edges
+    const edgeMin = 6 + 18 * pos;
+    const bh = Math.min(h, Math.max(edgeMin, heights[i]));
     const xLeft = (half - 1 - i) * step;
     const xRight = (half + i) * step;
     const y = h - bh;
@@ -441,7 +443,8 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
     const t = (i / half + gradientPhase) % 1;
     const hue = 210 + 110 * t;
     const sat = 92 - 20 * Math.abs(t - 0.5);
-    const light = 60 + 10 * Math.sin((t + gradientPhase) * Math.PI * 2);
+    const edgeLift = 9 * pos;
+    const light = 60 + edgeLift + 10 * Math.sin((t + gradientPhase) * Math.PI * 2);
     ctx.fillStyle = `hsla(${hue} ${sat}% ${light}% / ${alphaFactor})`;
     ctx.beginPath();
     ctx.roundRect(xLeft, y, barW, bh, rr);
@@ -450,6 +453,24 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
     ctx.roundRect(xRight, y, barW, bh, rr);
     ctx.fill();
   }
+
+  // Hard-edge guards: always render bars touching left/right border.
+  const edgePulse = 6 + 14 * (Math.sin(gradientPhase * 10) * 0.5 + 0.5);
+  const edgeH = Math.min(h, Math.max(edgePulse, h * (0.12 + globalEnergy * 0.16)));
+  const edgeY = h - edgeH;
+  const edgeR = Math.min(7, barW / 2, edgeH / 2);
+  const leftColor = `hsla(${210 + 110 * ((gradientPhase + 0.02) % 1)} 90% 66% / ${alphaFactor})`;
+  const rightColor = `hsla(${210 + 110 * ((gradientPhase + 0.52) % 1)} 90% 66% / ${alphaFactor})`;
+
+  ctx.fillStyle = leftColor;
+  ctx.beginPath();
+  ctx.roundRect(0, edgeY, barW, edgeH, edgeR);
+  ctx.fill();
+
+  ctx.fillStyle = rightColor;
+  ctx.beginPath();
+  ctx.roundRect(Math.max(0, w - barW), edgeY, barW, edgeH, edgeR);
+  ctx.fill();
 }
 
 function loop() {
