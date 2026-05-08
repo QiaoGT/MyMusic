@@ -827,10 +827,21 @@ function startRecording() {
     try {
       displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 30, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: true
+        audio: true,
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
+        surfaceSwitching: "include"
       });
     } catch {
       setStatus("你取消了网页录制授权");
+      return;
+    }
+    const displayTrack = displayStream.getVideoTracks()[0];
+    const ds = displayTrack?.getSettings?.().displaySurface || "";
+    if (ds && ds !== "browser") {
+      displayStream.getTracks().forEach((t) => t.stop());
+      setStatus("请在录制弹窗中选择“当前标签页(This Tab)”以录制完整网页");
+      recordStatusEl.textContent = "录制已取消：未选择当前标签页";
       return;
     }
     const mixed = new MediaStream();
@@ -872,7 +883,6 @@ function startRecording() {
       setStatus("MP4转码失败，建议在Chrome最新版重试");
     }
     };
-    const displayTrack = displayStream.getVideoTracks()[0];
     if (displayTrack) {
       displayTrackStopHandler = () => stopRecording();
       displayTrack.onended = displayTrackStopHandler;
