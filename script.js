@@ -50,11 +50,7 @@ const stageEl = document.getElementById("lyrics-stage");
 const lyricsMaskEl = document.querySelector(".lyrics-mask");
 const spectrumEl = document.getElementById("spectrum");
 const fullscreenSpectrumEl = document.getElementById("fullscreen-spectrum");
-const recordStatusEl = document.getElementById("record-status");
-const recordProgressEl = document.getElementById("record-progress");
-const recordStartBtn = document.getElementById("record-start");
-const recordStopBtn = document.getElementById("record-stop");
-const recordDownloadEl = document.getElementById("record-download");
+const exportVideoBtn = document.getElementById("export-video");
 const authOverlayEl = document.getElementById("auth-overlay");
 const authInputEl = document.getElementById("auth-input");
 const authSubmitEl = document.getElementById("auth-submit");
@@ -754,13 +750,6 @@ lyricsEl.addEventListener("click", (e) => {
   lyricManualUntil = Date.now() + 1200;
 });
 
-function resetRecordUi() {
-  recordStatusEl.textContent = "未开始";
-  recordProgressEl.style.width = "0%";
-  recordDownloadEl.classList.add("disabled");
-  recordDownloadEl.removeAttribute("href");
-}
-
 function stopRecording() {
   if (!recorder || recorder.state !== "recording") return;
   renderLoopActive = false;
@@ -828,6 +817,13 @@ function startRecording() {
   }
 
   (async () => {
+    try {
+      audio.currentTime = 0;
+      if (audio.paused) await audio.play();
+    } catch {
+      // continue and let user interaction policy decide playback state
+    }
+
     const target = stageEl;
     if (!target) {
       setStatus("录制目标不存在");
@@ -858,9 +854,7 @@ function startRecording() {
     const pickedMime = MediaRecorder.isTypeSupported(mp4Mime) ? mp4Mime : (MediaRecorder.isTypeSupported(webmMime) ? webmMime : "");
     recorder = pickedMime ? new MediaRecorder(mixed, { mimeType: pickedMime }) : new MediaRecorder(mixed);
 
-    recordStatusEl.textContent = "正在一键生成全屏视频...";
-    recordProgressEl.style.width = "0%";
-    recordDownloadEl.classList.add("disabled");
+    setStatus("正在一键生成全屏视频...");
 
     recorder.ondataavailable = (ev) => {
       if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
@@ -875,18 +869,20 @@ function startRecording() {
       try {
         let finalBlob = rawBlob;
         if (!(recorder.mimeType || "").includes("mp4")) {
-          recordStatusEl.textContent = "转码MP4中，请稍候...";
+          setStatus("转码MP4中，请稍候...");
           finalBlob = await transcodeToMp4(rawBlob);
         }
         const url = URL.createObjectURL(finalBlob);
-        recordDownloadEl.href = url;
-        recordDownloadEl.download = `${songName}.mp4`;
-        recordDownloadEl.classList.remove("disabled");
-        recordStatusEl.textContent = "视频生成完成（MP4）";
-        recordProgressEl.style.width = "100%";
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${songName}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        setStatus("视频生成完成（MP4），已开始下载");
       } catch (err) {
         console.error(err);
-        recordStatusEl.textContent = "MP4转码失败，请重试";
         setStatus("MP4转码失败，建议在Chrome最新版重试");
       }
     };
@@ -923,7 +919,8 @@ function startRecording() {
     recordTimer = setInterval(() => {
       if (!audio.duration) return;
       const ratio = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
-      recordProgressEl.style.width = `${ratio * 100}%`;
+      const percent = Math.floor(ratio * 100);
+      if (percent % 20 === 0) setStatus(`正在生成视频 ${percent}%`);
       if (audio.currentTime >= audio.duration - 0.05) stopRecording();
     }, 150);
   })();
@@ -938,7 +935,6 @@ async function checkAuthRequired() {
   } catch {
     return false;
   }
-}
 
 async function verifyPassword(password) {
   try {
@@ -963,16 +959,14 @@ async function initAuth() {
   return false;
 }
 
-recordStartBtn.addEventListener("click", startRecording);
-recordStopBtn.addEventListener("click", stopRecording);
+exportVideoBtn.addEventListener("click", startRecording);
 window.addEventListener("keydown", (e) => {
   const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
   if (tag === "input" || tag === "textarea") return;
 
   if (e.altKey && (e.key === "b" || e.key === "B")) {
     e.preventDefault();
-    if (recorder && recorder.state === "recording") stopRecording();
-    else startRecording();
+    if (!recorder || recorder.state !== "recording") startRecording();
     return;
   }
 
@@ -1052,7 +1046,6 @@ setModeIcon();
 setPlayIcon(true);
 coverEl.src = DEFAULT_COVER;
 audio.volume = 1;
-resetRecordUi();
 const savedTextColor = localStorage.getItem("mymusic_lyric_text_color") || "#ffffff";
 const savedFillColor = localStorage.getItem("mymusic_lyric_fill_color") || "#5aa2ff";
 lyricTextColorInput.value = savedTextColor;
