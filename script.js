@@ -11,6 +11,7 @@ const AUDIO_EXTS = [".mp3", ".flac", ".wav", ".m4a", ".ogg"];
 const COVER_EXTS = ["jpg", "jpeg", "png", "webp"];
 
 const rawBase = `https://raw.githubusercontent.com/${CONFIG.user}/${CONFIG.repo}/${CONFIG.branch}`;
+const apiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/${CONFIG.musicFolder}`;
 
 const DEFAULT_COVER =
   "data:image/svg+xml;charset=UTF-8," +
@@ -70,9 +71,12 @@ async function exists(url) {
 }
 
 async function resolveCover(baseName) {
+  const candidates = [baseName, `${baseName}-cover`];
   for (const ext of COVER_EXTS) {
-    const url = `${rawBase}/${CONFIG.imgFolder}/${encodeURIComponent(baseName)}.${ext}`;
-    if (await exists(url)) return url;
+    for (const fileBase of candidates) {
+      const url = `${rawBase}/${CONFIG.imgFolder}/${encodeURIComponent(fileBase)}.${ext}`;
+      if (await exists(url)) return url;
+    }
   }
   return DEFAULT_COVER;
 }
