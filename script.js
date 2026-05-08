@@ -84,6 +84,8 @@ let recordChunks = [];
 let recordTimer = null;
 let fullscreenSpectrumTimer = null;
 let appReady = false;
+let ffmpegEngine = null;
+let ffmpegLoading = null;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -388,11 +390,11 @@ function drawSpectrum() {
   drawSpectrumOn(spectrumEl, 1);
   if (document.fullscreenElement === stageEl) {
     const dimmed = stageEl.classList.contains("spectrum-dim");
-    drawSpectrumOn(fullscreenSpectrumEl, dimmed ? 0.42 : 1);
+    drawSpectrumOn(fullscreenSpectrumEl, dimmed ? 0.42 : 1, 1.45);
   }
 }
 
-function drawSpectrumOn(canvas, alphaFactor = 1) {
+function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -447,7 +449,7 @@ function drawSpectrumOn(canvas, alphaFactor = 1) {
     spectrumSmooth[i] = spectrumSmooth[i] * 0.64 + boosted * 0.36;
     const edgeWeight = Math.pow(pos, 0.8);
     const dynamicFloor = h * (0.06 + 0.10 * globalEnergy + 0.12 * edgeWeight);
-    const bh = Math.max(dynamicFloor, spectrumSmooth[i] * h);
+    const bh = Math.max(dynamicFloor, Math.min(h, spectrumSmooth[i] * h * ampBoost));
     const xLeft = (half - 1 - i) * (barW + gap);
     const xRight = (half + i) * (barW + gap);
     const y = h - bh;
@@ -761,6 +763,48 @@ function stopRecording() {
   }
 }
 
+async function ensureFfmpeg() {
+  if (ffmpegEngine) return ffmpegEngine;
+  if (ffmpegLoading) return ffmpegLoading;
+  ffmpegLoading = new Promise(async (resolve, reject) => {
+    try {
+      if (!window.FFmpeg || !window.FFmpeg.createFFmpeg) throw new Error("FFmpeg库加载失败");
+      const { createFFmpeg } = window.FFmpeg;
+      const engine = createFFmpeg({
+        log: false,
+        corePath: "https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js"
+      });
+      await engine.load();
+      ffmpegEngine = engine;
+      resolve(engine);
+    } catch (err) {
+      reject(err);
+    } finally {
+      ffmpegLoading = null;
+    }
+  });
+  return ffmpegLoading;
+}
+
+async function transcodeToMp4(inputBlob) {
+  const engine = await ensureFfmpeg();
+  const fetchFile = window.FFmpeg.fetchFile;
+  engine.FS("writeFile", "input.webm", await fetchFile(inputBlob));
+  await engine.run(
+    "-i", "input.webm",
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-b:a", "192k",
+    "-movflags", "+faststart",
+    "output.mp4"
+  );
+  const data = engine.FS("readFile", "output.mp4");
+  engine.FS("unlink", "input.webm");
+  engine.FS("unlink", "output.mp4");
+  return new Blob([data.buffer], { type: "video/mp4" });
+}
+
 function startRecording() {
   if (!audio.src) {
     setStatus("请先播放歌曲");
@@ -772,25 +816,49 @@ function startRecording() {
     setStatus("当前浏览器不支持录制");
     return;
   }
-  recordStream = stream;
+  const visualSource = document.fullscreenElement === stageEl ? fullscreenSpectrumEl : spectrumEl;
+  const visualStream = visualSource && visualSource.captureStream ? visualSource.captureStream(30) : null;
+  if (!visualStream) {
+    setStatus("当前浏览器不支持视频录制");
+    return;
+  }
+  const mixed = new MediaStream();
+  visualStream.getVideoTracks().forEach((t) => mixed.addTrack(t));
+  stream.getAudioTracks().forEach((t) => mixed.addTrack(t));
+  recordStream = mixed;
   recordChunks = [];
-  recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+  const mp4Mime = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
+  const webmMime = "video/webm;codecs=vp9,opus";
+  const pickedMime = MediaRecorder.isTypeSupported(mp4Mime) ? mp4Mime : (MediaRecorder.isTypeSupported(webmMime) ? webmMime : "");
+  recorder = pickedMime ? new MediaRecorder(mixed, { mimeType: pickedMime }) : new MediaRecorder(mixed);
   recordStatusEl.textContent = "录制中...";
   recordProgressEl.style.width = "0%";
   recordDownloadEl.classList.add("disabled");
   recorder.ondataavailable = (ev) => {
     if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
   };
-  recorder.onstop = () => {
+  recorder.onstop = async () => {
     if (recordTimer) clearInterval(recordTimer);
-    const blob = new Blob(recordChunks, { type: recorder.mimeType || "audio/webm" });
     const songName = playlist[currentIndex]?.name || "recorded-song";
-    const url = URL.createObjectURL(blob);
-    recordDownloadEl.href = url;
-    recordDownloadEl.download = `${songName}.webm`;
-    recordDownloadEl.classList.remove("disabled");
-    recordStatusEl.textContent = "录制完成，可下载";
-    recordProgressEl.style.width = "100%";
+    const rawBlob = new Blob(recordChunks, { type: recorder.mimeType || "video/webm" });
+
+    try {
+      let finalBlob = rawBlob;
+      if (!(recorder.mimeType || "").includes("mp4")) {
+        recordStatusEl.textContent = "转码MP4中，请稍候...";
+        finalBlob = await transcodeToMp4(rawBlob);
+      }
+      const url = URL.createObjectURL(finalBlob);
+      recordDownloadEl.href = url;
+      recordDownloadEl.download = `${songName}.mp4`;
+      recordDownloadEl.classList.remove("disabled");
+      recordStatusEl.textContent = "录制完成（MP4）";
+      recordProgressEl.style.width = "100%";
+    } catch (err) {
+      console.error(err);
+      recordStatusEl.textContent = "MP4转码失败，请重试";
+      setStatus("MP4转码失败，建议在Chrome最新版重试");
+    }
   };
   recorder.start(250);
   if (recordTimer) clearInterval(recordTimer);
@@ -839,10 +907,68 @@ async function initAuth() {
 recordStartBtn.addEventListener("click", startRecording);
 recordStopBtn.addEventListener("click", stopRecording);
 window.addEventListener("keydown", (e) => {
+  const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
+  if (tag === "input" || tag === "textarea") return;
+
   if (e.altKey && (e.key === "b" || e.key === "B")) {
     e.preventDefault();
     if (recorder && recorder.state === "recording") stopRecording();
     else startRecording();
+    return;
+  }
+
+  if (e.key === " " || e.code === "Space") {
+    e.preventDefault();
+    playBtn.click();
+    return;
+  }
+  if (e.key === "f" || e.key === "F") {
+    e.preventDefault();
+    fullBtn.click();
+    return;
+  }
+  if (e.key === "ArrowUp") {
+    e.preventDefault();
+    audio.volume = Math.min(1, audio.volume + 0.05);
+    volumeEl.value = String(audio.volume);
+    return;
+  }
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    audio.volume = Math.max(0, audio.volume - 0.05);
+    volumeEl.value = String(audio.volume);
+    return;
+  }
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    prevBtn.click();
+    return;
+  }
+  if (e.key === "ArrowRight") {
+    e.preventDefault();
+    nextBtn.click();
+    return;
+  }
+  if (e.key === "1") {
+    e.preventDefault();
+    playMode = "list";
+    setModeIcon();
+    setStatus("播放模式：顺序");
+    return;
+  }
+  if (e.key === "2") {
+    e.preventDefault();
+    playMode = "single";
+    setModeIcon();
+    setStatus("播放模式：单曲");
+    return;
+  }
+  if (e.key === "3") {
+    e.preventDefault();
+    playMode = "shuffle";
+    setModeIcon();
+    setStatus("播放模式：随机");
+    return;
   }
 });
 authSubmitEl.addEventListener("click", async () => {
