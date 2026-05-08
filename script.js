@@ -41,9 +41,11 @@ const lyricSettingsBtn = document.getElementById("btn-lyric-settings");
 const lyricModal = document.getElementById("lyric-modal");
 const lyricTextColorInput = document.getElementById("lyric-text-color");
 const lyricFillColorInput = document.getElementById("lyric-fill-color");
+const bgLinkInput = document.getElementById("bg-link-input");
 const lyricSaveBtn = document.getElementById("lyric-save");
 const lyricCancelBtn = document.getElementById("lyric-cancel");
 const stageEl = document.getElementById("lyrics-stage");
+const lyricsMaskEl = document.querySelector(".lyrics-mask");
 const spectrumEl = document.getElementById("spectrum");
 
 let playlist = [];
@@ -61,6 +63,8 @@ let freqData = null;
 let spectrumPhase = 0;
 let spectrumSmooth = [];
 let gradientPhase = 0;
+let lyricManualUntil = 0;
+let fullscreenHideTimer = null;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -81,6 +85,22 @@ function setStatus(msg) { statusEl.textContent = msg; }
 function applyLyricColors(textColor, fillColor) {
   document.documentElement.style.setProperty("--lyric-active-text", textColor);
   document.documentElement.style.setProperty("--lyric-fill-color", fillColor);
+}
+
+function applyBackgroundFromUrl(url) {
+  const clean = (url || "").trim();
+  if (!clean) {
+    document.body.style.backgroundImage = "";
+    localStorage.removeItem("mymusic_bg_link");
+    setStatus("已恢复默认背景");
+    return;
+  }
+  document.body.style.backgroundImage = `linear-gradient(rgba(4,7,12,.58), rgba(4,7,12,.58)), url("${clean}")`;
+  document.body.style.backgroundSize = "cover";
+  document.body.style.backgroundPosition = "center";
+  document.body.style.backgroundRepeat = "no-repeat";
+  localStorage.setItem("mymusic_bg_link", clean);
+  setStatus("自定义背景已应用");
 }
 
 function parseLrc(text) {
@@ -186,7 +206,7 @@ function renderLyrics() {
     return;
   }
   lyricsEl.innerHTML = lrcLines
-    .map((l) => `<p><span class="lyric-line"><span class="base">${safeText(l.text)}</span><span class="fill">${safeText(l.text)}</span></span></p>`)
+    .map((l) => `<p data-time="${l.time}"><span class="lyric-line"><span class="base">${safeText(l.text)}</span><span class="fill">${safeText(l.text)}</span></span></p>`)
     .join("");
 }
 
@@ -226,6 +246,7 @@ function updateLyrics() {
   const fill = p.querySelector(".fill");
   if (fill) fill.style.width = `${ratio * 100}%`;
 
+  if (Date.now() < lyricManualUntil) return;
   const container = lyricsEl.parentElement;
   if (!container) return;
   // Use viewport-space correction to avoid layout/scale drift on desktop.
@@ -256,7 +277,14 @@ function setPlayIcon(paused) {
 }
 function setModeIcon() {
   modeBtn.textContent = PLAY_MODE_ICON[playMode];
-  modeBtn.setAttribute("data-tip", PLAY_MODE_TEXT[playMode]);
+  modeBtn.setAttribute("data-tip", `模式：${PLAY_MODE_TEXT[playMode]}`);
+}
+
+function formatUploadDate(isoTime) {
+  if (!isoTime) return "上传时间未知";
+  const d = new Date(isoTime);
+  if (Number.isNaN(d.getTime())) return "上传时间未知";
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} 上传`;
 }
 
 function ensureAnalyser() {
@@ -288,43 +316,52 @@ function drawSpectrum() {
   const bars = Math.max(64, Math.floor(w / 10));
   const gap = 4;
   const barW = Math.max(1.2, (w - gap * (bars - 1)) / bars);
+  const half = Math.floor(bars / 2);
   if (!analyser || !freqData) {
     // fallback animation when analyser is unavailable
     spectrumPhase += 0.08;
-    for (let i = 0; i < bars; i += 1) {
+    for (let i = 0; i < half; i += 1) {
       const wave = (Math.sin(spectrumPhase + i * 0.35) + 1) / 2;
       const bh = Math.max(2, wave * h * 0.45);
-      const x = i * (barW + gap);
+      const xLeft = (half - 1 - i) * (barW + gap);
+      const xRight = (half + i) * (barW + gap);
       const y = h - bh;
       ctx.fillStyle = "rgba(237,244,255,.35)";
       const rw = barW;
       const rr = Math.min(6, rw / 2, bh / 2);
       ctx.beginPath();
-      ctx.roundRect(x, y, rw, bh, rr);
+      ctx.roundRect(xLeft, y, rw, bh, rr);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.roundRect(xRight, y, rw, bh, rr);
       ctx.fill();
     }
     return;
   }
 
   analyser.getByteFrequencyData(freqData);
-  if (spectrumSmooth.length !== bars) spectrumSmooth = new Array(bars).fill(0);
+  if (spectrumSmooth.length !== half) spectrumSmooth = new Array(half).fill(0);
   gradientPhase += 0.0025;
-  for (let i = 0; i < bars; i += 1) {
-    const binIndex = Math.min(freqData.length - 1, Math.floor((i / bars) * freqData.length));
+  for (let i = 0; i < half; i += 1) {
+    const binIndex = Math.min(freqData.length - 1, Math.floor((i / half) * freqData.length));
     const raw = freqData[binIndex] / 255;
     spectrumSmooth[i] = spectrumSmooth[i] * 0.72 + raw * 0.28;
     const bh = Math.max(2, spectrumSmooth[i] * h);
-    const x = i * (barW + gap);
+    const xLeft = (half - 1 - i) * (barW + gap);
+    const xRight = (half + i) * (barW + gap);
     const y = h - bh;
     const rw = barW;
     const rr = Math.min(7, rw / 2, bh / 2);
-    const t = (i / bars + gradientPhase) % 1;
+    const t = (i / half + gradientPhase) % 1;
     const hue = 210 + 110 * t; // blue -> cyan -> gold-ish
     const sat = 92 - 20 * Math.abs(t - 0.5);
     const light = 60 + 10 * Math.sin((t + gradientPhase) * Math.PI * 2);
     ctx.fillStyle = `hsl(${hue} ${sat}% ${light}%)`;
     ctx.beginPath();
-    ctx.roundRect(x, y, rw, bh, rr);
+    ctx.roundRect(xLeft, y, rw, bh, rr);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.roundRect(xRight, y, rw, bh, rr);
     ctx.fill();
   }
 }
@@ -357,6 +394,18 @@ function nextIndex() {
   return (currentIndex + 1) % playlist.length;
 }
 
+function prevIndex() {
+  if (!playlist.length) return 0;
+  if (playMode === "single") return currentIndex;
+  if (playMode === "shuffle") {
+    if (playlist.length === 1) return currentIndex;
+    let n = currentIndex;
+    while (n === currentIndex) n = Math.floor(Math.random() * playlist.length);
+    return n;
+  }
+  return (currentIndex - 1 + playlist.length) % playlist.length;
+}
+
 async function fetchLyrics(url) {
   try {
     const res = await fetch(url);
@@ -380,6 +429,7 @@ async function loadSong(index, autoplay = true) {
   audio.currentTime = 0;
   titleEl.textContent = song.name;
   coverEl.src = resolveCover(song.name);
+  document.getElementById("artist").textContent = formatUploadDate(song.uploadedAt);
 
   await fetchLyrics(song.lrcUrl);
   resetLyricsToStart();
@@ -411,19 +461,20 @@ async function loadPlaylist() {
 
     const prefix = `/${CONFIG.musicFolder}/`;
     playlist = files
-      .map((f) => f.name)
-      .filter((p) => p.startsWith(prefix))
-      .map((p) => p.slice(p.lastIndexOf("/") + 1))
-      .filter((n) => AUDIO_EXTS.some((ext) => n.toLowerCase().endsWith(ext)))
-      .sort((a, b) => a.localeCompare(b, "zh-CN"))
-      .map((fn) => {
+      .filter((f) => (f.name || "").startsWith(prefix))
+      .map((f) => ({ name: f.name.slice(f.name.lastIndexOf("/") + 1), time: f.time || "" }))
+      .filter((entry) => AUDIO_EXTS.some((ext) => entry.name.toLowerCase().endsWith(ext)))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
+      .map((entry) => {
+        const fn = entry.name;
         const b = baseName(fn);
         const lrcResolved = resolveLrc(b);
         return {
           name: b,
           url: `${cdn}/${CONFIG.musicFolder}/${encodeURIComponent(fn)}`,
           lrcUrl: lrcResolved.url,
-          lrcFileName: lrcResolved.fileName
+          lrcFileName: lrcResolved.fileName,
+          uploadedAt: entry.time
         };
       });
 
@@ -448,7 +499,7 @@ listEl.addEventListener("click", async (e) => {
   await loadSong(Number(li.dataset.i), true);
 });
 
-prevBtn.addEventListener("click", () => loadSong(currentIndex - 1, true));
+prevBtn.addEventListener("click", () => loadSong(prevIndex(), true));
 nextBtn.addEventListener("click", () => loadSong(nextIndex(), true));
 
 playBtn.addEventListener("click", async () => {
@@ -509,6 +560,27 @@ document.addEventListener("fullscreenchange", () => {
   const on = !!document.fullscreenElement;
   fullBtn.textContent = on ? "🡼" : "⛶";
   fullBtn.setAttribute("data-tip", on ? "退出全屏" : "歌词全屏");
+  if (!on) {
+    stageEl.classList.remove("controls-hidden");
+    if (fullscreenHideTimer) clearTimeout(fullscreenHideTimer);
+    fullscreenHideTimer = null;
+  } else {
+    restartFullscreenHideTimer();
+  }
+});
+
+function restartFullscreenHideTimer() {
+  if (!document.fullscreenElement) return;
+  if (fullscreenHideTimer) clearTimeout(fullscreenHideTimer);
+  stageEl.classList.remove("controls-hidden");
+  fullscreenHideTimer = setTimeout(() => {
+    stageEl.classList.add("controls-hidden");
+  }, 5000);
+}
+
+stageEl.addEventListener("mousemove", () => {
+  if (!document.fullscreenElement) return;
+  restartFullscreenHideTimer();
 });
 
 lyricSettingsBtn.addEventListener("click", () => {
@@ -520,20 +592,29 @@ lyricCancelBtn.addEventListener("click", () => {
 lyricSaveBtn.addEventListener("click", () => {
   const textColor = lyricTextColorInput.value || "#ffffff";
   const fillColor = lyricFillColorInput.value || "#5aa2ff";
+  const bgLink = bgLinkInput.value || "";
   applyLyricColors(textColor, fillColor);
+  applyBackgroundFromUrl(bgLink);
   localStorage.setItem("mymusic_lyric_text_color", textColor);
   localStorage.setItem("mymusic_lyric_fill_color", fillColor);
   lyricModal.classList.add("hidden");
-  setStatus("歌词颜色已更新");
+  setStatus("设置已保存");
 });
 lyricModal.addEventListener("click", (e) => {
   if (e.target === lyricModal) lyricModal.classList.add("hidden");
 });
+lyricsMaskEl.addEventListener("wheel", () => {
+  lyricManualUntil = Date.now() + 3000;
+}, { passive: true });
 
-function tickClock() {
-  const now = new Date();
-  document.getElementById("artist").textContent = now.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) + " · Neon Radio";
-}
+lyricsEl.addEventListener("click", (e) => {
+  const line = e.target.closest("p[data-time]");
+  if (!line) return;
+  const t = Number(line.dataset.time);
+  if (!Number.isFinite(t)) return;
+  audio.currentTime = t;
+  lyricManualUntil = Date.now() + 1200;
+});
 
 setModeIcon();
 setPlayIcon(true);
@@ -544,6 +625,7 @@ const savedFillColor = localStorage.getItem("mymusic_lyric_fill_color") || "#5aa
 lyricTextColorInput.value = savedTextColor;
 lyricFillColorInput.value = savedFillColor;
 applyLyricColors(savedTextColor, savedFillColor);
-tickClock();
-setInterval(tickClock, 60000);
+const savedBgLink = localStorage.getItem("mymusic_bg_link") || "";
+bgLinkInput.value = savedBgLink;
+if (savedBgLink) applyBackgroundFromUrl(savedBgLink);
 loadPlaylist();

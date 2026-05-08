@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #06090f;
   --panel: rgba(14, 18, 27, 0.72);
   --line: rgba(173, 202, 255, 0.18);
@@ -7,14 +7,14 @@
   --accent: #4df1c6;
   --lyric-active-text: #ffffff;
   --lyric-fill-color: #5aa2ff;
-  --lyric-font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --lyric-font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;`r`n  --custom-bg: none;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
 body {
   font-family: "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--text);
-  background: radial-gradient(circle at 10% -10%, #19345c 0%, #070b14 45%, #05070c 100%);
+  background-image:`r`n    linear-gradient(rgba(4,7,12,.58), rgba(4,7,12,.58)),`r`n    var(--custom-bg),`r`n    radial-gradient(circle at 10% -10%, #19345c 0%, #070b14 45%, #05070c 100%);`r`n  background-size: cover, cover, cover;`r`n  background-position: center, center, center;`r`n  background-repeat: no-repeat, no-repeat, no-repeat;
   overflow: hidden;
 }
 .noise {
@@ -37,7 +37,7 @@ body {
   grid-template-rows: 1fr 176px;
   gap: 14px;
   height: 100vh;
-  padding: 14px;
+  padding: 14px 14px 0;
 }
 .panel {
   border: 1px solid var(--line);
@@ -83,8 +83,19 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
+  scrollbar-width: none;
+}
+.lyrics-mask::-webkit-scrollbar { width: 0; height: 0; display: none; }
+#lyrics-stage.controls-hidden #btn-full,
+#lyrics-stage.controls-hidden #btn-lyric-settings {
+  opacity: 0;
+  pointer-events: none;
+}
+#btn-full, #btn-lyric-settings {
+  transition: opacity .2s ease;
 }
 #lyrics {
   width: min(900px, 92%);
@@ -98,6 +109,7 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   transform: scale(.92);
   transition: all .16s ease;
   font-size: clamp(1rem, 2.35vw, 1.6rem);
+  cursor: pointer;
 }
 #lyrics p.active {
   opacity: 1;
@@ -136,7 +148,10 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   grid-column: 1 / 4;
   width: 100%;
   justify-self: center;
-  padding: 10px 14px;
+  padding: 10px 14px 0;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 #spectrum { width: 100%; opacity: .95; display: block; }
 #volume { width: 100%; accent-color: var(--accent); }
@@ -202,6 +217,14 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   font-size: 0.86rem;
 }
 #lyric-text-color, #lyric-fill-color { width: 100%; height: 44px; border: 0; background: transparent; padding: 0; }
+#bg-link-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  padding: 10px;
+}
 .modal-actions {
   position: absolute;
   top: 10px;
@@ -211,9 +234,7 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
 }
 .text-btn { width: auto; padding: 0 14px; }
 
-#lyrics-stage:fullscreen {
-  background: radial-gradient(circle at 20% 0%, #15385d 0%, #0a111c 45%, #06090f 100%);
-}
+#lyrics-stage:fullscreen {`r`n  background-image:`r`n    linear-gradient(rgba(4,7,12,.58), rgba(4,7,12,.58)),`r`n    var(--custom-bg),`r`n    radial-gradient(circle at 20% 0%, #15385d 0%, #0a111c 45%, #06090f 100%);`r`n  background-size: cover, cover, cover;`r`n  background-position: center, center, center;`r`n  background-repeat: no-repeat, no-repeat, no-repeat;`r`n}
 #lyrics-stage:fullscreen #lyrics { width: min(1220px, 94%); }
 #lyrics-stage:fullscreen #btn-full {
   top: 12px !important;
