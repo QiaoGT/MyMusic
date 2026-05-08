@@ -16,7 +16,7 @@ const PLAY_MODE_TEXT = { list: "顺序", single: "单曲", shuffle: "随机" };
 
 const cdn = `https://raw.githubusercontent.com/${CONFIG.user}/${CONFIG.repo}/${CONFIG.branch}`;
 const commitsApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/commits`;
-const contentsApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents`;
+const MANIFEST_URL = "./playlist.json";
 
 const DEFAULT_COVER =
   "data:image/svg+xml;charset=UTF-8," +
@@ -139,46 +139,30 @@ function parseSrt(text) {
   return out.sort((a, b) => a.time - b.time);
 }
 
-async function fetchGithubFolder(folder) {
-  const url = `${contentsApiBase}/${folder}?ref=${encodeURIComponent(CONFIG.branch)}&t=${Date.now()}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`GitHub目录读取失败 ${folder}: ${res.status}`);
-  const list = await res.json();
-  return Array.isArray(list) ? list : [];
+async function fetchManifest() {
+  const res = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`清单读取失败 ${res.status}`);
+  const data = await res.json();
+  if (!data || !Array.isArray(data.music) || !Array.isArray(data.lyrics) || !Array.isArray(data.covers)) {
+    throw new Error("playlist.json 格式无效");
+  }
+  return data;
 }
 
-async function fetchIndex() {
-  const [mus, lrc, img] = await Promise.all([
-    fetchGithubFolder(CONFIG.musicFolder),
-    fetchGithubFolder(CONFIG.lrcFolder),
-    fetchGithubFolder(CONFIG.imgFolder)
-  ]);
-  const toFlat = (folder, entry) => ({
-    name: `/${folder}/${entry.name}`,
-    time: ""
-  });
-  return [
-    ...mus.map((x) => toFlat(CONFIG.musicFolder, x)),
-    ...lrc.map((x) => toFlat(CONFIG.lrcFolder, x)),
-    ...img.map((x) => toFlat(CONFIG.imgFolder, x))
-  ];
-}
-
-function buildLookup(files) {
+function buildLookup(manifest) {
   coverSet = new Set();
   lrcMap = new Map();
 
-  files.forEach((f) => {
-    const p = f.name || "";
-    if (p.startsWith(`/${CONFIG.imgFolder}/`)) {
-      coverSet.add(p.slice(p.lastIndexOf("/") + 1).toLowerCase());
-    }
-    if (p.startsWith(`/${CONFIG.lrcFolder}/`) && LYRIC_EXTS.some((ext) => p.toLowerCase().endsWith(ext))) {
-      const fn = p.slice(p.lastIndexOf("/") + 1);
-      const key = normalizeName(baseName(fn));
-      const prev = lrcMap.get(key);
-      if (!prev || fn.toLowerCase().endsWith(".lrc")) lrcMap.set(key, fn);
-    }
+  manifest.covers.forEach((fn) => {
+    if (typeof fn === "string") coverSet.add(fn.toLowerCase());
+  });
+
+  manifest.lyrics.forEach((fn) => {
+    if (typeof fn !== "string") return;
+    if (!LYRIC_EXTS.some((ext) => fn.toLowerCase().endsWith(ext))) return;
+    const key = normalizeName(baseName(fn));
+    const prev = lrcMap.get(key);
+    if (!prev || fn.toLowerCase().endsWith(".lrc")) lrcMap.set(key, fn);
   });
 }
 
@@ -548,13 +532,12 @@ async function loadSong(index, autoplay = true) {
 async function loadPlaylist() {
   setStatus("正在加载资源...");
   try {
-    const files = await fetchIndex();
-    buildLookup(files);
+    const manifest = await fetchManifest();
+    buildLookup(manifest);
 
-    const prefix = `/${CONFIG.musicFolder}/`;
-    playlist = files
-      .filter((f) => (f.name || "").startsWith(prefix))
-      .map((f) => ({ name: f.name.slice(f.name.lastIndexOf("/") + 1), time: f.time || "" }))
+    playlist = manifest.music
+      .filter((name) => typeof name === "string")
+      .map((name) => ({ name, time: "" }))
       .filter((entry) => AUDIO_EXTS.some((ext) => entry.name.toLowerCase().endsWith(ext)))
       .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
       .map((entry) => {
