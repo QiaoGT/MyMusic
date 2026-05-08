@@ -387,10 +387,10 @@ function ensureAnalyser() {
 }
 
 function drawSpectrum() {
-  drawSpectrumOn(spectrumEl, 1);
+  drawSpectrumOn(spectrumEl, 1, 1.7);
   if (document.fullscreenElement === stageEl) {
     const dimmed = stageEl.classList.contains("spectrum-dim");
-    drawSpectrumOn(fullscreenSpectrumEl, dimmed ? 0.42 : 1, 1.45);
+    drawSpectrumOn(fullscreenSpectrumEl, dimmed ? 0.72 : 1, 1.7);
   }
 }
 
