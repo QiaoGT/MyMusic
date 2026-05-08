@@ -1,5 +1,5 @@
-﻿const CONFIG = {
-  user: "wiobr21",
+const CONFIG = {
+  user: "QiaoGT",
   repo: "MyMusic",
   branch: "main",
   musicFolder: "mus",
@@ -11,7 +11,23 @@ const AUDIO_EXTS = [".mp3", ".flac", ".wav", ".m4a", ".ogg"];
 const COVER_EXTS = ["jpg", "jpeg", "png", "webp"];
 
 const rawBase = `https://raw.githubusercontent.com/${CONFIG.user}/${CONFIG.repo}/${CONFIG.branch}`;
-const apiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/${CONFIG.musicFolder}`;
+
+const DEFAULT_COVER =
+  "data:image/svg+xml;charset=UTF-8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#1f2937"/>
+          <stop offset="100%" stop-color="#111827"/>
+        </linearGradient>
+      </defs>
+      <rect width="320" height="320" fill="url(#g)"/>
+      <circle cx="160" cy="160" r="72" fill="#374151"/>
+      <circle cx="160" cy="160" r="18" fill="#9ca3af"/>
+      <text x="160" y="280" font-size="22" text-anchor="middle" fill="#e5e7eb" font-family="Arial, sans-serif">MyMusic</text>
+    </svg>`
+  );
 
 let playlist = [];
 let currentIndex = 0;
@@ -58,7 +74,7 @@ async function resolveCover(baseName) {
     const url = `${rawBase}/${CONFIG.imgFolder}/${encodeURIComponent(baseName)}.${ext}`;
     if (await exists(url)) return url;
   }
-  return "https://via.placeholder.com/320x320?text=No+Cover";
+  return DEFAULT_COVER;
 }
 
 async function fetchPlaylist() {
