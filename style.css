@@ -5,7 +5,8 @@
   --text: #eef4ff;
   --mute: #8ea0be;
   --accent: #4df1c6;
-  --lyric-highlight: #5aa2ff;
+  --lyric-active-text: #ffffff;
+  --lyric-fill-color: #5aa2ff;
   --lyric-font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 * { box-sizing: border-box; }
@@ -64,7 +65,19 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
 
 .center { position: relative; overflow: hidden; }
 #btn-full { position: absolute; top: 12px; right: 12px; z-index: 9; }
-.lyric-settings { position: absolute; top: 62px; right: 12px; z-index: 9; }
+.lyric-settings {
+  position: absolute;
+  top: calc(12px + 42px + 8px);
+  right: 12px;
+  z-index: 9;
+}
+#btn-lyric-settings {
+  position: absolute !important;
+  top: calc(12px + 42px + 8px) !important;
+  right: 12px !important;
+  left: auto !important;
+  z-index: 10 !important;
+}
 .lyrics-mask {
   height: 100%;
   display: flex;
@@ -89,11 +102,11 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
 #lyrics p.active {
   opacity: 1;
   transform: scale(1.22);
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--lyric-highlight) 40%, transparent));
+  filter: drop-shadow(0 0 10px rgba(255,255,255,0.24));
 }
 .lyric-line { position: relative; display: inline-block; }
 .base { color: #8fa4c5; }
-#lyrics p.active .base { color: var(--lyric-highlight); }
+#lyrics p.active .base { color: var(--lyric-active-text); }
 .fill {
   position: absolute;
   top: 0;
@@ -101,8 +114,8 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   width: 0%;
   overflow: hidden;
   white-space: nowrap;
-  color: var(--lyric-highlight);
-  text-shadow: 0 0 16px color-mix(in srgb, var(--lyric-highlight) 50%, transparent);
+  color: var(--lyric-fill-color);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--lyric-fill-color) 55%, transparent);
   transition: width .08s linear;
 }
 
@@ -119,10 +132,14 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
 #list li:hover { background: rgba(255,255,255,.07); border-color: var(--line); }
 #list li.active { background: rgba(77,241,198,.2); border-color: rgba(77,241,198,.45); color: #dcfff4; }
 
-.bottom { grid-column: 1 / 4; padding: 10px 14px; }
+.bottom {
+  grid-column: 1 / 4;
+  width: 100%;
+  justify-self: center;
+  padding: 10px 14px;
+}
 #spectrum { width: 100%; opacity: .95; display: block; }
-.timeline { display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; gap: 10px; margin-top: 2px; }
-#progress, #volume { width: 100%; accent-color: var(--accent); }
+#volume { width: 100%; accent-color: var(--accent); }
 .controls { display: grid; grid-template-columns: 1fr; gap: 8px; align-items: center; margin-top: 10px; }
 .icon {
   width: 42px;
@@ -170,21 +187,43 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
 }
 .modal.hidden { display: none; }
 .modal-card {
+  position: relative;
   width: min(320px, 90vw);
   background: rgba(12, 16, 24, 0.96);
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
 }
-.modal-card h3 { margin: 0 0 12px; font-size: 1rem; }
-#lyric-color { width: 100%; height: 44px; border: 0; background: transparent; padding: 0; }
-.modal-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
+.modal-card h3 { margin: 0 0 12px; font-size: 1rem; padding-right: 120px; }
+.color-label {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--mute);
+  font-size: 0.86rem;
+}
+#lyric-text-color, #lyric-fill-color { width: 100%; height: 44px; border: 0; background: transparent; padding: 0; }
+.modal-actions {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+}
 .text-btn { width: auto; padding: 0 14px; }
 
 #lyrics-stage:fullscreen {
   background: radial-gradient(circle at 20% 0%, #15385d 0%, #0a111c 45%, #06090f 100%);
 }
 #lyrics-stage:fullscreen #lyrics { width: min(1220px, 94%); }
+#lyrics-stage:fullscreen #btn-full {
+  top: 12px !important;
+  right: 12px !important;
+}
+#lyrics-stage:fullscreen #btn-lyric-settings {
+  top: calc(12px + 42px + 8px) !important;
+  right: 12px !important;
+  left: auto !important;
+}
 
 @media (max-width: 1100px) {
   body { overflow-y: auto; }
@@ -194,6 +233,6 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto auto;
   }
-  .bottom { grid-column: auto; }
+  .bottom { grid-column: auto; width: 100%; }
   .vol { justify-self: start; }
 }

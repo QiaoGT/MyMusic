@@ -26,11 +26,8 @@ const coverEl = document.getElementById("cover");
 const titleEl = document.getElementById("title");
 const listEl = document.getElementById("list");
 const lyricsEl = document.getElementById("lyrics");
-const progressEl = document.getElementById("progress");
 const miniProgressEl = document.getElementById("mini-progress");
 const volumeEl = document.getElementById("volume");
-const nowEl = document.getElementById("now");
-const totalEl = document.getElementById("total");
 const miniNowEl = document.getElementById("mini-now");
 const miniTotalEl = document.getElementById("mini-total");
 const countEl = document.getElementById("count");
@@ -42,7 +39,8 @@ const nextBtn = document.getElementById("next");
 const fullBtn = document.getElementById("btn-full");
 const lyricSettingsBtn = document.getElementById("btn-lyric-settings");
 const lyricModal = document.getElementById("lyric-modal");
-const lyricColorInput = document.getElementById("lyric-color");
+const lyricTextColorInput = document.getElementById("lyric-text-color");
+const lyricFillColorInput = document.getElementById("lyric-fill-color");
 const lyricSaveBtn = document.getElementById("lyric-save");
 const lyricCancelBtn = document.getElementById("lyric-cancel");
 const stageEl = document.getElementById("lyrics-stage");
@@ -80,24 +78,25 @@ function normalizeName(s) {
 }
 function setStatus(msg) { statusEl.textContent = msg; }
 
-function applyLyricHighlightColor(color) {
-  document.documentElement.style.setProperty("--lyric-highlight", color);
+function applyLyricColors(textColor, fillColor) {
+  document.documentElement.style.setProperty("--lyric-active-text", textColor);
+  document.documentElement.style.setProperty("--lyric-fill-color", fillColor);
 }
 
 function parseLrc(text) {
   const parsed = text
     .split(/\r?\n/)
     .flatMap((line) => {
-      const content = line.replace(/\[[^\]]*\]/g, "").trim();
-      const tags = [...line.matchAll(/\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]/g)];
+      const raw = line.trim();
+      if (!raw) return [];
+
+      const content = raw.replace(/\[[^\]]*\]/g, "").trim();
+      const tags = [...raw.matchAll(/\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]/g)];
       return tags.map((m) => ({ time: Number(m[1]) * 60 + Number(m[2]), text: content || "..." }));
     })
     .filter((x) => Number.isFinite(x.time))
     .sort((a, b) => a.time - b.time);
-
-  if (!parsed.length) return parsed;
-  const offset = parsed[0].time;
-  return offset > 1 ? parsed.map((x) => ({ ...x, time: Math.max(0, x.time - offset) })) : parsed;
+  return parsed;
 }
 
 async function fetchIndex() {
@@ -134,9 +133,44 @@ function resolveCover(songBase) {
 }
 
 function resolveLrc(songBase) {
-  const hit = lrcMap.get(normalizeName(songBase));
-  const fn = hit || `${songBase}.lrc`;
-  return `${cdn}/${CONFIG.lrcFolder}/${encodeURIComponent(fn)}`;
+  const normalized = normalizeName(songBase);
+  const exact = lrcMap.get(normalized);
+  if (exact) return { fileName: exact, url: `${cdn}/${CONFIG.lrcFolder}/${encodeURIComponent(exact)}` };
+
+  // Fuzzy fallback: match by inclusion first.
+  const candidates = [...lrcMap.entries()];
+  const fuzzy = candidates.find(([key]) => key.includes(normalized) || normalized.includes(key));
+  if (fuzzy) {
+    const fileName = fuzzy[1];
+    return { fileName, url: `${cdn}/${CONFIG.lrcFolder}/${encodeURIComponent(fileName)}` };
+  }
+
+  // Similarity fallback: require high overlap to avoid mismatching unrelated songs.
+  const score = (a, b) => {
+    if (!a || !b) return 0;
+    const min = Math.min(a.length, b.length);
+    let samePrefix = 0;
+    for (let i = 0; i < min; i += 1) {
+      if (a[i] !== b[i]) break;
+      samePrefix += 1;
+    }
+    return samePrefix / Math.max(a.length, b.length);
+  };
+  let best = null;
+  for (const [key, fileName] of candidates) {
+    const s = score(normalized, key);
+    if (!best || s > best.s) best = { s, fileName };
+  }
+  if (best && best.s >= 0.6) {
+    return { fileName: best.fileName, url: `${cdn}/${CONFIG.lrcFolder}/${encodeURIComponent(best.fileName)}` };
+  }
+
+  const fileName = `${songBase}.lrc`;
+  return { fileName, url: `${cdn}/${CONFIG.lrcFolder}/${encodeURIComponent(fileName)}` };
+}
+
+function hasLrc(songBase) {
+  return lrcMap.has(normalizeName(songBase));
 }
 
 function renderList() {
@@ -154,8 +188,6 @@ function renderLyrics() {
   lyricsEl.innerHTML = lrcLines
     .map((l) => `<p><span class="lyric-line"><span class="base">${safeText(l.text)}</span><span class="fill">${safeText(l.text)}</span></span></p>`)
     .join("");
-  const first = lyricsEl.querySelector("p");
-  if (first) first.classList.add("active");
 }
 
 function updateLyrics() {
@@ -166,8 +198,6 @@ function updateLyrics() {
     if (t >= lrcLines[i].time) idx = i;
     else break;
   }
-  if (idx < 0) return;
-
   const ps = lyricsEl.querySelectorAll("p");
   ps.forEach((p) => p.classList.remove("active"));
   ps.forEach((p, i) => {
@@ -176,6 +206,15 @@ function updateLyrics() {
     if (i < idx) fill.style.width = "100%";
     if (i > idx) fill.style.width = "0%";
   });
+
+  // Before the first lyric timestamp: keep all lines inactive.
+  if (idx < 0) {
+    ps.forEach((p) => {
+      const fill = p.querySelector(".fill");
+      if (fill) fill.style.width = "0%";
+    });
+    return;
+  }
 
   const p = ps[idx];
   if (!p) return;
@@ -187,10 +226,18 @@ function updateLyrics() {
   const fill = p.querySelector(".fill");
   if (fill) fill.style.width = `${ratio * 100}%`;
 
-  const lineHeight = window.innerWidth < 1100 ? 50 : 56;
-  const containerH = lyricsEl.parentElement ? lyricsEl.parentElement.clientHeight : 420;
-  const centerAnchor = containerH * 0.5 - lineHeight * 0.5;
-  lyricsEl.style.transform = `translateY(${-idx * lineHeight + centerAnchor}px)`;
+  const container = lyricsEl.parentElement;
+  if (!container) return;
+  // Use viewport-space correction to avoid layout/scale drift on desktop.
+  const cRect = container.getBoundingClientRect();
+  const pRect = p.getBoundingClientRect();
+  const containerCenter = cRect.top + cRect.height * 0.5;
+  const lineCenter = pRect.top + pRect.height * 0.5;
+  const delta = containerCenter - lineCenter;
+  const current = getComputedStyle(lyricsEl).transform;
+  const currentY = current && current !== "none" ? new DOMMatrix(current).m42 : 0;
+  const nextY = currentY + delta;
+  lyricsEl.style.transform = `translateY(${nextY}px)`;
 }
 
 function resetLyricsToStart() {
@@ -199,9 +246,8 @@ function resetLyricsToStart() {
   ps.forEach((p) => p.classList.remove("active"));
   ps.forEach((p, i) => {
     const fill = p.querySelector(".fill");
-    if (fill) fill.style.width = i === 0 ? "0%" : "0%";
+    if (fill) fill.style.width = "0%";
   });
-  if (ps[0]) ps[0].classList.add("active");
 }
 
 function setPlayIcon(paused) {
@@ -239,38 +285,38 @@ function drawSpectrum() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  const bars = Math.max(64, Math.floor(w / 10));
+  const gap = 4;
+  const barW = Math.max(1.2, (w - gap * (bars - 1)) / bars);
   if (!analyser || !freqData) {
     // fallback animation when analyser is unavailable
-    const bars = 48;
-    const barW = w / bars;
     spectrumPhase += 0.08;
     for (let i = 0; i < bars; i += 1) {
       const wave = (Math.sin(spectrumPhase + i * 0.35) + 1) / 2;
       const bh = Math.max(2, wave * h * 0.45);
-      const x = i * barW;
+      const x = i * (barW + gap);
       const y = h - bh;
       ctx.fillStyle = "rgba(237,244,255,.35)";
-      const rw = Math.max(1, barW - 2);
+      const rw = barW;
       const rr = Math.min(6, rw / 2, bh / 2);
       ctx.beginPath();
-      ctx.roundRect(x + 1, y, rw, bh, rr);
+      ctx.roundRect(x, y, rw, bh, rr);
       ctx.fill();
     }
     return;
   }
 
   analyser.getByteFrequencyData(freqData);
-  const bars = Math.min(58, freqData.length);
-  const barW = w / bars;
   if (spectrumSmooth.length !== bars) spectrumSmooth = new Array(bars).fill(0);
-  gradientPhase += 0.008;
+  gradientPhase += 0.0025;
   for (let i = 0; i < bars; i += 1) {
-    const raw = freqData[i + 2] / 255;
+    const binIndex = Math.min(freqData.length - 1, Math.floor((i / bars) * freqData.length));
+    const raw = freqData[binIndex] / 255;
     spectrumSmooth[i] = spectrumSmooth[i] * 0.72 + raw * 0.28;
     const bh = Math.max(2, spectrumSmooth[i] * h);
-    const x = i * barW;
+    const x = i * (barW + gap);
     const y = h - bh;
-    const rw = Math.max(1, barW - 2);
+    const rw = barW;
     const rr = Math.min(7, rw / 2, bh / 2);
     const t = (i / bars + gradientPhase) % 1;
     const hue = 210 + 110 * t; // blue -> cyan -> gold-ish
@@ -278,7 +324,7 @@ function drawSpectrum() {
     const light = 60 + 10 * Math.sin((t + gradientPhase) * Math.PI * 2);
     ctx.fillStyle = `hsl(${hue} ${sat}% ${light}%)`;
     ctx.beginPath();
-    ctx.roundRect(x + 1, y, rw, bh, rr);
+    ctx.roundRect(x, y, rw, bh, rr);
     ctx.fill();
   }
 }
@@ -286,12 +332,9 @@ function drawSpectrum() {
 function loop() {
   const cur = audio.currentTime || 0;
   const total = audio.duration || 0;
-  nowEl.textContent = fmt(cur);
-  totalEl.textContent = fmt(total);
   miniNowEl.textContent = fmt(cur);
   miniTotalEl.textContent = fmt(total);
-  progressEl.value = total ? (cur / total) * 100 : 0;
-  miniProgressEl.value = progressEl.value;
+  miniProgressEl.value = total ? (cur / total) * 100 : 0;
   updateLyrics();
   drawSpectrum();
   rafId = requestAnimationFrame(loop);
@@ -320,9 +363,11 @@ async function fetchLyrics(url) {
     if (!res.ok) throw new Error("歌词不存在");
     lrcLines = parseLrc(await res.text());
     renderLyrics();
+    setStatus("歌词已匹配");
   } catch {
     lrcLines = [];
     lyricsEl.innerHTML = "<p>暂无歌词</p>";
+    setStatus("当前歌曲没有匹配歌词文件");
   }
   lyricsEl.style.transform = "translateY(0)";
 }
@@ -336,13 +381,13 @@ async function loadSong(index, autoplay = true) {
   titleEl.textContent = song.name;
   coverEl.src = resolveCover(song.name);
 
-  await fetchLyrics(song.lrc);
+  await fetchLyrics(song.lrcUrl);
   resetLyricsToStart();
   renderList();
 
   if (!autoplay) {
     setPlayIcon(true);
-    setStatus(`已加载：${song.name}`);
+    setStatus(`已加载：${song.name}（歌词：${song.lrcFileName}）`);
     return;
   }
 
@@ -351,7 +396,7 @@ async function loadSong(index, autoplay = true) {
     if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
     await audio.play();
     setPlayIcon(false);
-    setStatus(`正在播放：${song.name}`);
+    setStatus(`正在播放：${song.name}（歌词：${song.lrcFileName}）`);
   } catch {
     setPlayIcon(true);
     setStatus("点击播放开始");
@@ -373,10 +418,12 @@ async function loadPlaylist() {
       .sort((a, b) => a.localeCompare(b, "zh-CN"))
       .map((fn) => {
         const b = baseName(fn);
+        const lrcResolved = resolveLrc(b);
         return {
           name: b,
           url: `${cdn}/${CONFIG.musicFolder}/${encodeURIComponent(fn)}`,
-          lrc: resolveLrc(b)
+          lrcUrl: lrcResolved.url,
+          lrcFileName: lrcResolved.fileName
         };
       });
 
@@ -386,7 +433,8 @@ async function loadPlaylist() {
       lyricsEl.innerHTML = "<p>没有找到可播放音乐</p>";
       return;
     }
-    await loadSong(0, false);
+    const firstWithLyric = playlist.findIndex((s) => hasLrc(s.name));
+    await loadSong(firstWithLyric >= 0 ? firstWithLyric : 0, false);
   } catch (e) {
     console.error(e);
     setStatus(e?.message || "加载失败");
@@ -425,15 +473,9 @@ modeBtn.addEventListener("click", () => {
   setStatus(`播放模式：${PLAY_MODE_TEXT[playMode]}`);
 });
 
-progressEl.addEventListener("input", () => {
-  if (!audio.duration) return;
-  audio.currentTime = (Number(progressEl.value) / 100) * audio.duration;
-  miniProgressEl.value = progressEl.value;
-});
 miniProgressEl.addEventListener("input", () => {
   if (!audio.duration) return;
   audio.currentTime = (Number(miniProgressEl.value) / 100) * audio.duration;
-  progressEl.value = miniProgressEl.value;
 });
 
 volumeEl.addEventListener("input", () => {
@@ -441,7 +483,6 @@ volumeEl.addEventListener("input", () => {
 });
 
 audio.addEventListener("loadedmetadata", () => {
-  totalEl.textContent = fmt(audio.duration);
   miniTotalEl.textContent = fmt(audio.duration);
 });
 audio.addEventListener("play", () => {
@@ -477,11 +518,13 @@ lyricCancelBtn.addEventListener("click", () => {
   lyricModal.classList.add("hidden");
 });
 lyricSaveBtn.addEventListener("click", () => {
-  const color = lyricColorInput.value || "#5aa2ff";
-  applyLyricHighlightColor(color);
-  localStorage.setItem("mymusic_lyric_highlight", color);
+  const textColor = lyricTextColorInput.value || "#ffffff";
+  const fillColor = lyricFillColorInput.value || "#5aa2ff";
+  applyLyricColors(textColor, fillColor);
+  localStorage.setItem("mymusic_lyric_text_color", textColor);
+  localStorage.setItem("mymusic_lyric_fill_color", fillColor);
   lyricModal.classList.add("hidden");
-  setStatus("歌词高亮颜色已更新");
+  setStatus("歌词颜色已更新");
 });
 lyricModal.addEventListener("click", (e) => {
   if (e.target === lyricModal) lyricModal.classList.add("hidden");
@@ -496,9 +539,11 @@ setModeIcon();
 setPlayIcon(true);
 coverEl.src = DEFAULT_COVER;
 audio.volume = 1;
-const savedColor = localStorage.getItem("mymusic_lyric_highlight") || "#5aa2ff";
-lyricColorInput.value = savedColor;
-applyLyricHighlightColor(savedColor);
+const savedTextColor = localStorage.getItem("mymusic_lyric_text_color") || "#ffffff";
+const savedFillColor = localStorage.getItem("mymusic_lyric_fill_color") || "#5aa2ff";
+lyricTextColorInput.value = savedTextColor;
+lyricFillColorInput.value = savedFillColor;
+applyLyricColors(savedTextColor, savedFillColor);
 tickClock();
 setInterval(tickClock, 60000);
 loadPlaylist();

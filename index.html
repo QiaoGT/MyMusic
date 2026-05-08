@@ -41,7 +41,7 @@
 
     <aside class="panel right">
       <div class="right-head">
-        <strong>Playlist</strong>
+        <strong>播放列表</strong>
         <span id="count">0</span>
       </div>
       <ul id="list"></ul>
@@ -49,12 +49,6 @@
 
     <footer class="panel bottom">
       <canvas id="spectrum" height="64"></canvas>
-
-      <div class="timeline">
-        <span id="now">00:00</span>
-        <input id="progress" type="range" min="0" max="100" step="0.1" value="0" />
-        <span id="total">00:00</span>
-      </div>
 
       <div class="controls">
         <label class="vol">Vol<input id="volume" type="range" min="0" max="1" step="0.01" value="1" /></label>
@@ -66,8 +60,11 @@
 
   <div id="lyric-modal" class="modal hidden">
     <div class="modal-card">
-      <h3>歌词高亮颜色</h3>
-      <input id="lyric-color" type="color" value="#5aa2ff" />
+      <h3>歌词颜色设置</h3>
+      <label class="color-label" for="lyric-text-color">当前句字体颜色</label>
+      <input id="lyric-text-color" type="color" value="#ffffff" />
+      <label class="color-label" for="lyric-fill-color">逐字高亮颜色</label>
+      <input id="lyric-fill-color" type="color" value="#5aa2ff" />
       <div class="modal-actions">
         <button id="lyric-save" class="icon text-btn">保存</button>
         <button id="lyric-cancel" class="icon text-btn">取消</button>
