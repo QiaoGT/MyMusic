@@ -141,13 +141,7 @@ function parseSrt(text) {
 
 async function fetchGithubFolder(folder) {
   const url = `${contentsApiBase}/${folder}?ref=${encodeURIComponent(CONFIG.branch)}&t=${Date.now()}`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "MyMusic-Player",
-      "Cache-Control": "no-cache"
-    },
-    cache: "no-store"
-  });
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`GitHub目录读取失败 ${folder}: ${res.status}`);
   const list = await res.json();
   return Array.isArray(list) ? list : [];
