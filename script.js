@@ -372,17 +372,18 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const bars = Math.max(64, Math.floor(w / 10));
-  const gap = 4;
-  const barW = Math.max(1.2, (w - gap * (bars - 1)) / bars);
+  const bars = Math.max(96, Math.floor(w / 10));
   const half = Math.floor(bars / 2);
+  const gap = 3;
+  const barW = Math.max(1, (w - gap * (bars - 1)) / bars);
+  const step = barW + gap;
   if (!analyser || !freqData) {
     spectrumPhase += 0.08;
     for (let i = 0; i < half; i += 1) {
-      const wave = (Math.sin(spectrumPhase + i * 0.35) + 1) / 2;
+      const wave = (Math.sin(spectrumPhase + i * 0.25) + 1) / 2;
       const bh = Math.max(2, wave * h * 0.45);
-      const xLeft = (half - 1 - i) * (barW + gap);
-      const xRight = (half + i) * (barW + gap);
+      const xLeft = (half - 1 - i) * step;
+      const xRight = (half + i) * step;
       const y = h - bh;
       ctx.fillStyle = `rgba(237,244,255,${0.35 * alphaFactor})`;
       const rr = Math.min(6, barW / 2, bh / 2);
@@ -403,8 +404,9 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
   for (let i = 0; i < freqData.length; i += 1) energySum += freqData[i];
   const globalEnergy = energySum / (freqData.length * 255);
 
+  const heights = new Array(half).fill(0);
   for (let i = 0; i < half; i += 1) {
-    const pos = half <= 1 ? 0 : i / (half - 1);
+    const pos = half <= 1 ? 0 : i / (half - 1); // 0 center, 1 edges
     const mapped = Math.pow(pos, 0.95);
     const binIndex = Math.min(freqData.length - 1, Math.floor(mapped * (freqData.length - 1)));
     const raw = freqData[binIndex] / 255;
@@ -418,8 +420,22 @@ function drawSpectrumOn(canvas, alphaFactor = 1, ampBoost = 1) {
     const edgeWeight = Math.pow(pos, 0.8);
     const dynamicFloor = h * (0.04 + 0.08 * globalEnergy + 0.09 * edgeWeight);
     const bh = Math.max(dynamicFloor, Math.min(h, spectrumSmooth[i] * h * ampBoost));
-    const xLeft = (half - 1 - i) * (barW + gap);
-    const xRight = (half + i) * (barW + gap);
+    heights[i] = bh;
+  }
+
+  // Edge compensation for split-axis mode.
+  const edgeCount = Math.max(6, Math.floor(half * 0.12));
+  for (let k = 0; k < edgeCount; k += 1) {
+    const idx = half - 1 - k; // edge side index
+    const refIdx = Math.max(0, idx - edgeCount);
+    const pulse = 2 + 10 * (Math.sin(gradientPhase * 14 + k * 0.55) * 0.5 + 0.5);
+    heights[idx] = Math.max(heights[idx], heights[refIdx] * 0.35 + pulse);
+  }
+
+  for (let i = 0; i < half; i += 1) {
+    const bh = Math.min(h, heights[i]);
+    const xLeft = (half - 1 - i) * step;
+    const xRight = (half + i) * step;
     const y = h - bh;
     const rr = Math.min(7, barW / 2, bh / 2);
     const t = (i / half + gradientPhase) % 1;
