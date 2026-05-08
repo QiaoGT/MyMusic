@@ -50,7 +50,6 @@ const stageEl = document.getElementById("lyrics-stage");
 const lyricsMaskEl = document.querySelector(".lyrics-mask");
 const spectrumEl = document.getElementById("spectrum");
 const fullscreenSpectrumEl = document.getElementById("fullscreen-spectrum");
-const exportVideoBtn = document.getElementById("export-video");
 const authOverlayEl = document.getElementById("auth-overlay");
 const authInputEl = document.getElementById("auth-input");
 const authSubmitEl = document.getElementById("auth-submit");
@@ -74,17 +73,8 @@ let gradientPhase = 0;
 let lyricManualUntil = 0;
 let fullscreenHideTimer = null;
 const uploadDateCache = new Map();
-let recorder = null;
-let recordStream = null;
-let recordChunks = [];
-let recordTimer = null;
 let fullscreenSpectrumTimer = null;
 let appReady = false;
-let ffmpegEngine = null;
-let ffmpegLoading = null;
-let displayTrackStopHandler = null;
-let renderCanvas = null;
-let renderLoopActive = false;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -750,182 +740,6 @@ lyricsEl.addEventListener("click", (e) => {
   lyricManualUntil = Date.now() + 1200;
 });
 
-function stopRecording() {
-  if (!recorder || recorder.state !== "recording") return;
-  renderLoopActive = false;
-  stageEl.classList.remove("exporting-video");
-  recorder.stop();
-  if (recordStream) {
-    recordStream.getTracks().forEach((t) => t.stop());
-    recordStream = null;
-  }
-  displayTrackStopHandler = null;
-}
-
-async function ensureFfmpeg() {
-  if (ffmpegEngine) return ffmpegEngine;
-  if (ffmpegLoading) return ffmpegLoading;
-  ffmpegLoading = new Promise(async (resolve, reject) => {
-    try {
-      if (!window.FFmpeg || !window.FFmpeg.createFFmpeg) throw new Error("FFmpeg库加载失败");
-      const { createFFmpeg } = window.FFmpeg;
-      const engine = createFFmpeg({
-        log: false,
-        corePath: "https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js"
-      });
-      await engine.load();
-      ffmpegEngine = engine;
-      resolve(engine);
-    } catch (err) {
-      reject(err);
-    } finally {
-      ffmpegLoading = null;
-    }
-  });
-  return ffmpegLoading;
-}
-
-async function transcodeToMp4(inputBlob) {
-  const engine = await ensureFfmpeg();
-  const fetchFile = window.FFmpeg.fetchFile;
-  engine.FS("writeFile", "input.webm", await fetchFile(inputBlob));
-  await engine.run(
-    "-i", "input.webm",
-    "-c:v", "libx264",
-    "-pix_fmt", "yuv420p",
-    "-c:a", "aac",
-    "-b:a", "192k",
-    "-movflags", "+faststart",
-    "output.mp4"
-  );
-  const data = engine.FS("readFile", "output.mp4");
-  engine.FS("unlink", "input.webm");
-  engine.FS("unlink", "output.mp4");
-  return new Blob([data.buffer.slice(0)], { type: "video/mp4" });
-}
-
-function startRecording() {
-  if (!audio.src) {
-    setStatus("请先播放歌曲");
-    return;
-  }
-  if (recorder && recorder.state === "recording") return;
-  const stream = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
-  if (!stream || typeof MediaRecorder === "undefined" || typeof window.html2canvas !== "function") {
-    setStatus("当前浏览器不支持一键生成视频");
-    return;
-  }
-
-  (async () => {
-    try {
-      audio.currentTime = 0;
-      if (audio.paused) await audio.play();
-    } catch {
-      // continue and let user interaction policy decide playback state
-    }
-
-    const target = stageEl;
-    if (!target) {
-      setStatus("录制目标不存在");
-      return;
-    }
-    stageEl.classList.add("exporting-video");
-
-    const W = 1920;
-    const H = 1080;
-    renderCanvas = document.createElement("canvas");
-    renderCanvas.width = W;
-    renderCanvas.height = H;
-    const ctx = renderCanvas.getContext("2d");
-    if (!ctx) {
-      setStatus("录制初始化失败");
-      return;
-    }
-
-    const visualStream = renderCanvas.captureStream(30);
-    const mixed = new MediaStream();
-    visualStream.getVideoTracks().forEach((t) => mixed.addTrack(t));
-    stream.getAudioTracks().forEach((t) => mixed.addTrack(t));
-    recordStream = mixed;
-    recordChunks = [];
-
-    const mp4Mime = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
-    const webmMime = "video/webm;codecs=vp9,opus";
-    const pickedMime = MediaRecorder.isTypeSupported(mp4Mime) ? mp4Mime : (MediaRecorder.isTypeSupported(webmMime) ? webmMime : "");
-    recorder = pickedMime ? new MediaRecorder(mixed, { mimeType: pickedMime }) : new MediaRecorder(mixed);
-
-    setStatus("正在一键生成全屏视频...");
-
-    recorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
-    };
-
-    recorder.onstop = async () => {
-      renderLoopActive = false;
-      stageEl.classList.remove("exporting-video");
-      if (recordTimer) clearInterval(recordTimer);
-      const songName = playlist[currentIndex]?.name || "recorded-song";
-      const rawBlob = new Blob(recordChunks, { type: recorder.mimeType || "video/webm" });
-      try {
-        let finalBlob = rawBlob;
-        if (!(recorder.mimeType || "").includes("mp4")) {
-          setStatus("转码MP4中，请稍候...");
-          finalBlob = await transcodeToMp4(rawBlob);
-        }
-        const url = URL.createObjectURL(finalBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${songName}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-        setStatus("视频生成完成（MP4），已开始下载");
-      } catch (err) {
-        console.error(err);
-        setStatus("MP4转码失败，建议在Chrome最新版重试");
-      }
-    };
-
-    renderLoopActive = true;
-    const renderFrame = async () => {
-      if (!renderLoopActive) return;
-      try {
-        const snap = await window.html2canvas(target, {
-          backgroundColor: "#06090f",
-          scale: 1,
-          useCORS: true,
-          logging: false
-        });
-        ctx.clearRect(0, 0, W, H);
-        const sw = snap.width;
-        const sh = snap.height;
-        const scale = Math.min(W / sw, H / sh);
-        const dw = sw * scale;
-        const dh = sh * scale;
-        const dx = (W - dw) / 2;
-        const dy = (H - dh) / 2;
-        ctx.drawImage(snap, dx, dy, dw, dh);
-      } catch {
-        // keep rendering loop alive even if one frame fails
-      }
-      setTimeout(renderFrame, 33);
-    };
-
-    recorder.start(250);
-    renderFrame();
-
-    if (recordTimer) clearInterval(recordTimer);
-    recordTimer = setInterval(() => {
-      if (!audio.duration) return;
-      const ratio = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
-      const percent = Math.floor(ratio * 100);
-      if (percent % 20 === 0) setStatus(`正在生成视频 ${percent}%`);
-      if (audio.currentTime >= audio.duration - 0.05) stopRecording();
-    }, 150);
-  })();
-}
-
 async function checkAuthRequired() {
   try {
     const res = await fetch("/api/config");
@@ -960,16 +774,9 @@ async function initAuth() {
   return false;
 }
 
-exportVideoBtn.addEventListener("click", startRecording);
 window.addEventListener("keydown", (e) => {
   const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
   if (tag === "input" || tag === "textarea") return;
-
-  if (e.altKey && (e.key === "b" || e.key === "B")) {
-    e.preventDefault();
-    if (!recorder || recorder.state !== "recording") startRecording();
-    return;
-  }
 
   if (e.key === " " || e.code === "Space") {
     e.preventDefault();
