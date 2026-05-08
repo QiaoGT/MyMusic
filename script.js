@@ -87,6 +87,8 @@ let appReady = false;
 let ffmpegEngine = null;
 let ffmpegLoading = null;
 let displayTrackStopHandler = null;
+let renderCanvas = null;
+let renderLoopActive = false;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -761,6 +763,8 @@ function resetRecordUi() {
 
 function stopRecording() {
   if (!recorder || recorder.state !== "recording") return;
+  renderLoopActive = false;
+  stageEl.classList.remove("exporting-video");
   recorder.stop();
   if (recordStream) {
     recordStream.getTracks().forEach((t) => t.stop());
@@ -818,82 +822,109 @@ function startRecording() {
   }
   if (recorder && recorder.state === "recording") return;
   const stream = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
-  if (!stream || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
-    setStatus("当前浏览器不支持录制");
+  if (!stream || typeof MediaRecorder === "undefined" || typeof window.html2canvas !== "function") {
+    setStatus("当前浏览器不支持一键生成视频");
     return;
   }
+
   (async () => {
-    let displayStream = null;
-    try {
-      displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 30, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: true,
-        preferCurrentTab: true,
-        selfBrowserSurface: "include",
-        surfaceSwitching: "include"
-      });
-    } catch {
-      setStatus("你取消了网页录制授权");
+    const target = stageEl;
+    if (!target) {
+      setStatus("录制目标不存在");
       return;
     }
-    const displayTrack = displayStream.getVideoTracks()[0];
-    const ds = displayTrack?.getSettings?.().displaySurface || "";
-    if (ds && ds !== "browser") {
-      displayStream.getTracks().forEach((t) => t.stop());
-      setStatus("请在录制弹窗中选择“当前标签页(This Tab)”以录制完整网页");
-      recordStatusEl.textContent = "录制已取消：未选择当前标签页";
+    stageEl.classList.add("exporting-video");
+
+    const W = 1920;
+    const H = 1080;
+    renderCanvas = document.createElement("canvas");
+    renderCanvas.width = W;
+    renderCanvas.height = H;
+    const ctx = renderCanvas.getContext("2d");
+    if (!ctx) {
+      setStatus("录制初始化失败");
       return;
     }
+
+    const visualStream = renderCanvas.captureStream(30);
     const mixed = new MediaStream();
-    displayStream.getVideoTracks().forEach((t) => mixed.addTrack(t));
+    visualStream.getVideoTracks().forEach((t) => mixed.addTrack(t));
     stream.getAudioTracks().forEach((t) => mixed.addTrack(t));
     recordStream = mixed;
     recordChunks = [];
+
     const mp4Mime = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
     const webmMime = "video/webm;codecs=vp9,opus";
     const pickedMime = MediaRecorder.isTypeSupported(mp4Mime) ? mp4Mime : (MediaRecorder.isTypeSupported(webmMime) ? webmMime : "");
     recorder = pickedMime ? new MediaRecorder(mixed, { mimeType: pickedMime }) : new MediaRecorder(mixed);
-    recordStatusEl.textContent = "网页全屏录制中...";
+
+    recordStatusEl.textContent = "正在一键生成全屏视频...";
     recordProgressEl.style.width = "0%";
     recordDownloadEl.classList.add("disabled");
+
     recorder.ondataavailable = (ev) => {
       if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
     };
-    recorder.onstop = async () => {
-    if (recordTimer) clearInterval(recordTimer);
-    const songName = playlist[currentIndex]?.name || "recorded-song";
-    const rawBlob = new Blob(recordChunks, { type: recorder.mimeType || "video/webm" });
 
-    try {
-      let finalBlob = rawBlob;
-      // Force MP4 output path even when browser records WebM.
-      if (!(recorder.mimeType || "").includes("mp4")) {
-        recordStatusEl.textContent = "转码MP4中，请稍候...";
-        finalBlob = await transcodeToMp4(rawBlob);
+    recorder.onstop = async () => {
+      renderLoopActive = false;
+      stageEl.classList.remove("exporting-video");
+      if (recordTimer) clearInterval(recordTimer);
+      const songName = playlist[currentIndex]?.name || "recorded-song";
+      const rawBlob = new Blob(recordChunks, { type: recorder.mimeType || "video/webm" });
+      try {
+        let finalBlob = rawBlob;
+        if (!(recorder.mimeType || "").includes("mp4")) {
+          recordStatusEl.textContent = "转码MP4中，请稍候...";
+          finalBlob = await transcodeToMp4(rawBlob);
+        }
+        const url = URL.createObjectURL(finalBlob);
+        recordDownloadEl.href = url;
+        recordDownloadEl.download = `${songName}.mp4`;
+        recordDownloadEl.classList.remove("disabled");
+        recordStatusEl.textContent = "视频生成完成（MP4）";
+        recordProgressEl.style.width = "100%";
+      } catch (err) {
+        console.error(err);
+        recordStatusEl.textContent = "MP4转码失败，请重试";
+        setStatus("MP4转码失败，建议在Chrome最新版重试");
       }
-      const url = URL.createObjectURL(finalBlob);
-      recordDownloadEl.href = url;
-      recordDownloadEl.download = `${songName}.mp4`;
-      recordDownloadEl.classList.remove("disabled");
-      recordStatusEl.textContent = "录制完成（MP4）";
-      recordProgressEl.style.width = "100%";
-    } catch (err) {
-      console.error(err);
-      recordStatusEl.textContent = "MP4转码失败，请重试";
-      setStatus("MP4转码失败，建议在Chrome最新版重试");
-    }
     };
-    if (displayTrack) {
-      displayTrackStopHandler = () => stopRecording();
-      displayTrack.onended = displayTrackStopHandler;
-    }
+
+    renderLoopActive = true;
+    const renderFrame = async () => {
+      if (!renderLoopActive) return;
+      try {
+        const snap = await window.html2canvas(target, {
+          backgroundColor: "#06090f",
+          scale: 1,
+          useCORS: true,
+          logging: false
+        });
+        ctx.clearRect(0, 0, W, H);
+        const sw = snap.width;
+        const sh = snap.height;
+        const scale = Math.min(W / sw, H / sh);
+        const dw = sw * scale;
+        const dh = sh * scale;
+        const dx = (W - dw) / 2;
+        const dy = (H - dh) / 2;
+        ctx.drawImage(snap, dx, dy, dw, dh);
+      } catch {
+        // keep rendering loop alive even if one frame fails
+      }
+      setTimeout(renderFrame, 33);
+    };
+
     recorder.start(250);
+    renderFrame();
+
     if (recordTimer) clearInterval(recordTimer);
     recordTimer = setInterval(() => {
-    if (!audio.duration) return;
-    const ratio = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
-    recordProgressEl.style.width = `${ratio * 100}%`;
-    if (audio.currentTime >= audio.duration - 0.05) stopRecording();
+      if (!audio.duration) return;
+      const ratio = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
+      recordProgressEl.style.width = `${ratio * 100}%`;
+      if (audio.currentTime >= audio.duration - 0.05) stopRecording();
     }, 150);
   })();
 }

@@ -335,6 +335,15 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
 #lyrics-stage:fullscreen #lyrics { width: min(1220px, 94%); }
 #lyrics-stage:fullscreen #fullscreen-spectrum { opacity: .95; }
 #lyrics-stage.spectrum-dim #fullscreen-spectrum { opacity: .72 !important; }
+#lyrics-stage.exporting-video {
+  background: radial-gradient(circle at 20% 0%, #15385d 0%, #0a111c 45%, #06090f 100%);
+}
+#lyrics-stage.exporting-video #lyrics {
+  width: min(1220px, 94%);
+}
+#lyrics-stage.exporting-video #fullscreen-spectrum {
+  opacity: .95 !important;
+}
 #lyrics-stage:fullscreen #btn-full {
   top: 12px !important;
   right: 12px !important;
