@@ -21,14 +21,18 @@ const DEFAULT_COVER =
   encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#17233a"/><stop offset="100%" stop-color="#0a101a"/></linearGradient></defs><rect width="400" height="400" fill="url(#g)"/><circle cx="200" cy="200" r="90" fill="#334155"/><circle cx="200" cy="200" r="22" fill="#d9e3f3"/><text x="200" y="340" text-anchor="middle" font-size="26" fill="#ecf3ff" font-family="Arial">MyMusic</text></svg>`);
 
 const audio = document.getElementById("audio");
+audio.crossOrigin = "anonymous";
 const coverEl = document.getElementById("cover");
 const titleEl = document.getElementById("title");
 const listEl = document.getElementById("list");
 const lyricsEl = document.getElementById("lyrics");
 const progressEl = document.getElementById("progress");
+const miniProgressEl = document.getElementById("mini-progress");
 const volumeEl = document.getElementById("volume");
 const nowEl = document.getElementById("now");
 const totalEl = document.getElementById("total");
+const miniNowEl = document.getElementById("mini-now");
+const miniTotalEl = document.getElementById("mini-total");
 const countEl = document.getElementById("count");
 const statusEl = document.getElementById("status");
 const modeBtn = document.getElementById("mode");
@@ -36,11 +40,13 @@ const prevBtn = document.getElementById("prev");
 const playBtn = document.getElementById("play");
 const nextBtn = document.getElementById("next");
 const fullBtn = document.getElementById("btn-full");
+const lyricSettingsBtn = document.getElementById("btn-lyric-settings");
+const lyricModal = document.getElementById("lyric-modal");
+const lyricColorInput = document.getElementById("lyric-color");
+const lyricSaveBtn = document.getElementById("lyric-save");
+const lyricCancelBtn = document.getElementById("lyric-cancel");
 const stageEl = document.getElementById("lyrics-stage");
 const spectrumEl = document.getElementById("spectrum");
-const fontSelect = document.getElementById("font-select");
-const fontCustom = document.getElementById("font-custom");
-const fontApply = document.getElementById("font-apply");
 
 let playlist = [];
 let lrcLines = [];
@@ -54,6 +60,9 @@ let audioCtx = null;
 let analyser = null;
 let sourceNode = null;
 let freqData = null;
+let spectrumPhase = 0;
+let spectrumSmooth = [];
+let gradientPhase = 0;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -70,6 +79,10 @@ function normalizeName(s) {
   return String(s).normalize("NFKC").toLowerCase().replace(/\s+/g, "").replace(/[·•\-_/\\()[\]{}【】「」'"`~!@#$%^&*+=|;:,.<>?，。！？：；（）]/g, "");
 }
 function setStatus(msg) { statusEl.textContent = msg; }
+
+function applyLyricHighlightColor(color) {
+  document.documentElement.style.setProperty("--lyric-highlight", color);
+}
 
 function parseLrc(text) {
   const parsed = text
@@ -141,6 +154,8 @@ function renderLyrics() {
   lyricsEl.innerHTML = lrcLines
     .map((l) => `<p><span class="lyric-line"><span class="base">${safeText(l.text)}</span><span class="fill">${safeText(l.text)}</span></span></p>`)
     .join("");
+  const first = lyricsEl.querySelector("p");
+  if (first) first.classList.add("active");
 }
 
 function updateLyrics() {
@@ -173,7 +188,20 @@ function updateLyrics() {
   if (fill) fill.style.width = `${ratio * 100}%`;
 
   const lineHeight = window.innerWidth < 1100 ? 50 : 56;
-  lyricsEl.style.transform = `translateY(${-idx * lineHeight + (window.innerWidth < 1100 ? 140 : 180)}px)`;
+  const containerH = lyricsEl.parentElement ? lyricsEl.parentElement.clientHeight : 420;
+  const centerAnchor = containerH * 0.5 - lineHeight * 0.5;
+  lyricsEl.style.transform = `translateY(${-idx * lineHeight + centerAnchor}px)`;
+}
+
+function resetLyricsToStart() {
+  lyricsEl.style.transform = "translateY(0)";
+  const ps = lyricsEl.querySelectorAll("p");
+  ps.forEach((p) => p.classList.remove("active"));
+  ps.forEach((p, i) => {
+    const fill = p.querySelector(".fill");
+    if (fill) fill.style.width = i === 0 ? "0%" : "0%";
+  });
+  if (ps[0]) ps[0].classList.add("active");
 }
 
 function setPlayIcon(paused) {
@@ -211,18 +239,47 @@ function drawSpectrum() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  if (!analyser || !freqData) return;
+  if (!analyser || !freqData) {
+    // fallback animation when analyser is unavailable
+    const bars = 48;
+    const barW = w / bars;
+    spectrumPhase += 0.08;
+    for (let i = 0; i < bars; i += 1) {
+      const wave = (Math.sin(spectrumPhase + i * 0.35) + 1) / 2;
+      const bh = Math.max(2, wave * h * 0.45);
+      const x = i * barW;
+      const y = h - bh;
+      ctx.fillStyle = "rgba(237,244,255,.35)";
+      const rw = Math.max(1, barW - 2);
+      const rr = Math.min(6, rw / 2, bh / 2);
+      ctx.beginPath();
+      ctx.roundRect(x + 1, y, rw, bh, rr);
+      ctx.fill();
+    }
+    return;
+  }
 
   analyser.getByteFrequencyData(freqData);
   const bars = Math.min(58, freqData.length);
   const barW = w / bars;
+  if (spectrumSmooth.length !== bars) spectrumSmooth = new Array(bars).fill(0);
+  gradientPhase += 0.008;
   for (let i = 0; i < bars; i += 1) {
-    const val = freqData[i + 2] / 255;
-    const bh = Math.max(2, val * h);
+    const raw = freqData[i + 2] / 255;
+    spectrumSmooth[i] = spectrumSmooth[i] * 0.72 + raw * 0.28;
+    const bh = Math.max(2, spectrumSmooth[i] * h);
     const x = i * barW;
     const y = h - bh;
-    ctx.fillStyle = "rgba(237,244,255,.88)";
-    ctx.fillRect(x + 1, y, Math.max(1, barW - 2), bh);
+    const rw = Math.max(1, barW - 2);
+    const rr = Math.min(7, rw / 2, bh / 2);
+    const t = (i / bars + gradientPhase) % 1;
+    const hue = 210 + 110 * t; // blue -> cyan -> gold-ish
+    const sat = 92 - 20 * Math.abs(t - 0.5);
+    const light = 60 + 10 * Math.sin((t + gradientPhase) * Math.PI * 2);
+    ctx.fillStyle = `hsl(${hue} ${sat}% ${light}%)`;
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y, rw, bh, rr);
+    ctx.fill();
   }
 }
 
@@ -231,7 +288,10 @@ function loop() {
   const total = audio.duration || 0;
   nowEl.textContent = fmt(cur);
   totalEl.textContent = fmt(total);
+  miniNowEl.textContent = fmt(cur);
+  miniTotalEl.textContent = fmt(total);
   progressEl.value = total ? (cur / total) * 100 : 0;
+  miniProgressEl.value = progressEl.value;
   updateLyrics();
   drawSpectrum();
   rafId = requestAnimationFrame(loop);
@@ -272,10 +332,12 @@ async function loadSong(index, autoplay = true) {
   currentIndex = (index + playlist.length) % playlist.length;
   const song = playlist[currentIndex];
   audio.src = song.url;
+  audio.currentTime = 0;
   titleEl.textContent = song.name;
   coverEl.src = resolveCover(song.name);
 
   await fetchLyrics(song.lrc);
+  resetLyricsToStart();
   renderList();
 
   if (!autoplay) {
@@ -332,43 +394,6 @@ async function loadPlaylist() {
   }
 }
 
-function setupFonts() {
-  const preferred = [
-    "LXGW WenKai", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Arial"
-  ];
-  const available = [];
-  if (document.fonts && typeof document.fonts.check === "function") {
-    preferred.forEach((f) => {
-      if (document.fonts.check(`16px '${f}'`)) available.push(f);
-    });
-  }
-
-  ["系统默认", ...available].forEach((f) => {
-    const op = document.createElement("option");
-    op.value = f;
-    op.textContent = f;
-    fontSelect.appendChild(op);
-  });
-
-  const saved = localStorage.getItem("mymusic_font") || "系统默认";
-  fontSelect.value = saved;
-  if (saved !== "系统默认") {
-    document.documentElement.style.setProperty("--lyric-font", `'${saved}', 'PingFang SC', 'Microsoft YaHei', sans-serif`);
-  }
-}
-
-function applyFont(name) {
-  if (!name || name === "系统默认") {
-    localStorage.removeItem("mymusic_font");
-    document.documentElement.style.setProperty("--lyric-font", `"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`);
-    setStatus("已切回系统默认字体");
-    return;
-  }
-  document.documentElement.style.setProperty("--lyric-font", `'${name}', 'PingFang SC', 'Microsoft YaHei', sans-serif`);
-  localStorage.setItem("mymusic_font", name);
-  setStatus(`已切换字体：${name}`);
-}
-
 listEl.addEventListener("click", async (e) => {
   const li = e.target.closest("li[data-i]");
   if (!li) return;
@@ -403,6 +428,12 @@ modeBtn.addEventListener("click", () => {
 progressEl.addEventListener("input", () => {
   if (!audio.duration) return;
   audio.currentTime = (Number(progressEl.value) / 100) * audio.duration;
+  miniProgressEl.value = progressEl.value;
+});
+miniProgressEl.addEventListener("input", () => {
+  if (!audio.duration) return;
+  audio.currentTime = (Number(miniProgressEl.value) / 100) * audio.duration;
+  progressEl.value = miniProgressEl.value;
 });
 
 volumeEl.addEventListener("input", () => {
@@ -411,6 +442,7 @@ volumeEl.addEventListener("input", () => {
 
 audio.addEventListener("loadedmetadata", () => {
   totalEl.textContent = fmt(audio.duration);
+  miniTotalEl.textContent = fmt(audio.duration);
 });
 audio.addEventListener("play", () => {
   setPlayIcon(false);
@@ -438,18 +470,21 @@ document.addEventListener("fullscreenchange", () => {
   fullBtn.setAttribute("data-tip", on ? "退出全屏" : "歌词全屏");
 });
 
-fontSelect.addEventListener("change", () => applyFont(fontSelect.value));
-fontApply.addEventListener("click", () => {
-  const f = fontCustom.value.trim();
-  if (!f) return;
-  if (![...fontSelect.options].some((o) => o.value === f)) {
-    const op = document.createElement("option");
-    op.value = f;
-    op.textContent = f;
-    fontSelect.appendChild(op);
-  }
-  fontSelect.value = f;
-  applyFont(f);
+lyricSettingsBtn.addEventListener("click", () => {
+  lyricModal.classList.remove("hidden");
+});
+lyricCancelBtn.addEventListener("click", () => {
+  lyricModal.classList.add("hidden");
+});
+lyricSaveBtn.addEventListener("click", () => {
+  const color = lyricColorInput.value || "#5aa2ff";
+  applyLyricHighlightColor(color);
+  localStorage.setItem("mymusic_lyric_highlight", color);
+  lyricModal.classList.add("hidden");
+  setStatus("歌词高亮颜色已更新");
+});
+lyricModal.addEventListener("click", (e) => {
+  if (e.target === lyricModal) lyricModal.classList.add("hidden");
 });
 
 function tickClock() {
@@ -457,11 +492,13 @@ function tickClock() {
   document.getElementById("artist").textContent = now.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) + " · Neon Radio";
 }
 
-setupFonts();
 setModeIcon();
 setPlayIcon(true);
 coverEl.src = DEFAULT_COVER;
 audio.volume = 1;
+const savedColor = localStorage.getItem("mymusic_lyric_highlight") || "#5aa2ff";
+lyricColorInput.value = savedColor;
+applyLyricHighlightColor(savedColor);
 tickClock();
 setInterval(tickClock, 60000);
 loadPlaylist();

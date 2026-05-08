@@ -18,16 +18,22 @@
       <h1 id="title">等待播放</h1>
       <p id="artist">Personal Radio</p>
 
-      <div class="font-box">
-        <label for="font-select">歌词字体</label>
-        <select id="font-select"></select>
-        <input id="font-custom" type="text" placeholder="输入字体名并应用" />
-        <button id="font-apply">应用字体</button>
+      <div class="side-controls">
+        <div class="mini-timeline">
+          <span id="mini-now">00:00</span>
+          <input id="mini-progress" type="range" min="0" max="100" step="0.1" value="0" />
+          <span id="mini-total">00:00</span>
+        </div>
+        <button id="mode" class="icon" data-tip="顺序">🔁</button>
+        <button id="prev" class="icon" data-tip="上一首">⏮</button>
+        <button id="play" class="icon primary" data-tip="播放">▶</button>
+        <button id="next" class="icon" data-tip="下一首">⏭</button>
       </div>
     </aside>
 
     <main class="panel center" id="lyrics-stage">
       <button id="btn-full" class="icon" data-tip="歌词全屏" aria-label="歌词全屏">⛶</button>
+      <button id="btn-lyric-settings" class="icon lyric-settings" data-tip="歌词设置" aria-label="歌词设置">⚙</button>
       <div class="lyrics-mask">
         <div id="lyrics"><p>正在加载歌曲...</p></div>
       </div>
@@ -51,15 +57,22 @@
       </div>
 
       <div class="controls">
-        <button id="mode" class="icon" data-tip="顺序">🔁</button>
-        <button id="prev" class="icon" data-tip="上一首">⏮</button>
-        <button id="play" class="icon primary" data-tip="播放">▶</button>
-        <button id="next" class="icon" data-tip="下一首">⏭</button>
         <label class="vol">Vol<input id="volume" type="range" min="0" max="1" step="0.01" value="1" /></label>
       </div>
 
       <p id="status">准备就绪</p>
     </footer>
+  </div>
+
+  <div id="lyric-modal" class="modal hidden">
+    <div class="modal-card">
+      <h3>歌词高亮颜色</h3>
+      <input id="lyric-color" type="color" value="#5aa2ff" />
+      <div class="modal-actions">
+        <button id="lyric-save" class="icon text-btn">保存</button>
+        <button id="lyric-cancel" class="icon text-btn">取消</button>
+      </div>
+    </div>
   </div>
 
   <audio id="audio" preload="metadata"></audio>
