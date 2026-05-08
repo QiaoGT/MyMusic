@@ -14,8 +14,7 @@ const PLAY_MODES = ["list", "single", "shuffle"];
 const PLAY_MODE_ICON = { list: "🔁", single: "🔂", shuffle: "🔀" };
 const PLAY_MODE_TEXT = { list: "顺序", single: "单曲", shuffle: "随机" };
 
-const cdn = `https://cdn.jsdelivr.net/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}`;
-const flatApi = `https://data.jsdelivr.com/v1/package/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}/flat`;
+const cdn = `https://raw.githubusercontent.com/${CONFIG.user}/${CONFIG.repo}/${CONFIG.branch}`;
 const commitsApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/commits`;
 const contentsApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents`;
 
@@ -141,36 +140,34 @@ function parseSrt(text) {
 }
 
 async function fetchGithubFolder(folder) {
-  const url = `${contentsApiBase}/${folder}?ref=${encodeURIComponent(CONFIG.branch)}`;
-  const res = await fetch(url, { headers: { "User-Agent": "MyMusic-Player" } });
+  const url = `${contentsApiBase}/${folder}?ref=${encodeURIComponent(CONFIG.branch)}&t=${Date.now()}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "MyMusic-Player",
+      "Cache-Control": "no-cache"
+    },
+    cache: "no-store"
+  });
   if (!res.ok) throw new Error(`GitHub目录读取失败 ${folder}: ${res.status}`);
   const list = await res.json();
   return Array.isArray(list) ? list : [];
 }
 
 async function fetchIndex() {
-  // Prefer GitHub contents API to avoid jsDelivr stale cache on file delete/replace.
-  try {
-    const [mus, lrc, img] = await Promise.all([
-      fetchGithubFolder(CONFIG.musicFolder),
-      fetchGithubFolder(CONFIG.lrcFolder),
-      fetchGithubFolder(CONFIG.imgFolder)
-    ]);
-    const toFlat = (folder, entry) => ({
-      name: `/${folder}/${entry.name}`,
-      time: ""
-    });
-    return [
-      ...mus.map((x) => toFlat(CONFIG.musicFolder, x)),
-      ...lrc.map((x) => toFlat(CONFIG.lrcFolder, x)),
-      ...img.map((x) => toFlat(CONFIG.imgFolder, x))
-    ];
-  } catch {
-    const res = await fetch(flatApi);
-    if (!res.ok) throw new Error(`索引拉取失败 ${res.status}`);
-    const data = await res.json();
-    return data.files || [];
-  }
+  const [mus, lrc, img] = await Promise.all([
+    fetchGithubFolder(CONFIG.musicFolder),
+    fetchGithubFolder(CONFIG.lrcFolder),
+    fetchGithubFolder(CONFIG.imgFolder)
+  ]);
+  const toFlat = (folder, entry) => ({
+    name: `/${folder}/${entry.name}`,
+    time: ""
+  });
+  return [
+    ...mus.map((x) => toFlat(CONFIG.musicFolder, x)),
+    ...lrc.map((x) => toFlat(CONFIG.lrcFolder, x)),
+    ...img.map((x) => toFlat(CONFIG.imgFolder, x))
+  ];
 }
 
 function buildLookup(files) {
