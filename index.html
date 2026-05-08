@@ -1,0 +1,49 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyMusic - 个人原创音乐</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="background-blur" id="bg-blur"></div>
+
+    <aside class="sidebar panel">
+      <div id="datetime-widget">
+        <h1 id="clock-time">00:00</h1>
+        <p id="clock-date">2026年5月8日</p>
+      </div>
+      <p class="hint">上传音频到 GitHub 的 <code>mus/</code> 后，刷新页面即可自动同步。</p>
+    </aside>
+
+    <main class="lyrics-container panel">
+      <div id="lyric-wrapper">
+        <p>正在拉取 GitHub 音乐列表...</p>
+      </div>
+    </main>
+
+    <section class="playlist-panel panel">
+      <div class="now-playing-card">
+        <img id="current-cover" src="https://via.placeholder.com/320x320?text=MyMusic" alt="Cover">
+        <h2 id="current-title">未播放</h2>
+        <p id="current-artist">MyMusic 创作</p>
+      </div>
+      <ul id="music-list"></ul>
+    </section>
+
+    <footer class="player-controls panel">
+      <input type="range" id="progress-bar" value="0" step="0.1" min="0" max="100">
+      <div class="btns">
+        <button id="btn-prev" type="button">上一首</button>
+        <button id="btn-play" type="button">播放</button>
+        <button id="btn-next" type="button">下一首</button>
+      </div>
+    </footer>
+  </div>
+
+  <audio id="audio-element" preload="metadata"></audio>
+  <script src="script.js"></script>
+</body>
+</html>
