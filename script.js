@@ -53,6 +53,10 @@ const authOverlayEl = document.getElementById("auth-overlay");
 const authInputEl = document.getElementById("auth-input");
 const authSubmitEl = document.getElementById("auth-submit");
 const authMsgEl = document.getElementById("auth-msg");
+const recordToggleBtn = document.getElementById("record-toggle");
+const recordDownloadBtn = document.getElementById("record-download");
+const recordProgressEl = document.getElementById("record-progress");
+const recordProgressTextEl = document.getElementById("record-progress-text");
 
 let playlist = [];
 let lrcLines = [];
@@ -74,6 +78,14 @@ let fullscreenHideTimer = null;
 const uploadDateCache = new Map();
 let fullscreenSpectrumTimer = null;
 let appReady = false;
+let mediaRecorder = null;
+let recordingStream = null;
+let recordingChunks = [];
+let recordingBlob = null;
+let recordingUrl = "";
+let recordingStartAt = 0;
+let recordingProgressTimer = null;
+let recordingDownloadName = "";
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -90,6 +102,147 @@ function normalizeName(s) {
   return String(s).normalize("NFKC").toLowerCase().replace(/\s+/g, "").replace(/[·•\-_/\\()[\]{}【】「」'"`~!@#$%^&*+=|;:,.<>?，。！？：；（）]/g, "");
 }
 function setStatus(msg) { statusEl.textContent = msg; }
+
+function updateRecordingProgress(value, text) {
+  if (recordProgressEl) recordProgressEl.value = Math.max(0, Math.min(100, value));
+  if (recordProgressTextEl) recordProgressTextEl.textContent = text;
+}
+
+function fmtRecordTime(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function downloadRecordingFile() {
+  if (!recordingUrl) return;
+  const a = document.createElement("a");
+  a.href = recordingUrl;
+  a.download = recordingDownloadName || `mymusic-record-${Date.now()}.webm`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function stopRecordingTracks() {
+  if (!recordingStream) return;
+  recordingStream.getTracks().forEach((t) => t.stop());
+  recordingStream = null;
+}
+
+function resetRecordingUiToIdle(msg = "未开始") {
+  if (recordingProgressTimer) {
+    clearInterval(recordingProgressTimer);
+    recordingProgressTimer = null;
+  }
+  if (recordToggleBtn) {
+    recordToggleBtn.textContent = "开始录制";
+    recordToggleBtn.setAttribute("data-tip", "开始录制");
+  }
+  updateRecordingProgress(0, msg);
+}
+
+async function startRecording() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    setStatus("当前浏览器不支持网页录制");
+    updateRecordingProgress(0, "当前浏览器不支持录制");
+    return;
+  }
+  if (mediaRecorder && mediaRecorder.state === "recording") return;
+
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+  } catch {
+    // Fullscreen may be denied; continue recording.
+  }
+
+  try {
+    recordingBlob = null;
+    if (recordingUrl) {
+      URL.revokeObjectURL(recordingUrl);
+      recordingUrl = "";
+    }
+    recordDownloadBtn.disabled = true;
+    recordingChunks = [];
+    recordingDownloadName = `mymusic-record-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
+    recordingStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30 },
+      audio: true
+    });
+
+    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : "video/webm";
+    mediaRecorder = new MediaRecorder(recordingStream, { mimeType: mime });
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) recordingChunks.push(e.data);
+    };
+    mediaRecorder.onstop = () => {
+      if (recordingProgressTimer) {
+        clearInterval(recordingProgressTimer);
+        recordingProgressTimer = null;
+      }
+      stopRecordingTracks();
+      if (!recordingChunks.length) {
+        resetRecordingUiToIdle("录制已取消");
+        setStatus("录制未产生有效内容");
+        return;
+      }
+      recordingBlob = new Blob(recordingChunks, { type: mime });
+      recordingUrl = URL.createObjectURL(recordingBlob);
+      recordDownloadBtn.disabled = false;
+      updateRecordingProgress(100, "录制完成，已自动下载");
+      downloadRecordingFile();
+      setStatus("录制完成，视频已下载");
+      if (recordToggleBtn) {
+        recordToggleBtn.textContent = "重新录制";
+        recordToggleBtn.setAttribute("data-tip", "重新录制");
+      }
+    };
+
+    recordingStream.getVideoTracks().forEach((track) => {
+      track.addEventListener("ended", () => {
+        if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+      });
+    });
+
+    mediaRecorder.start(1000);
+    recordingStartAt = Date.now();
+    if (recordToggleBtn) {
+      recordToggleBtn.textContent = "停止录制";
+      recordToggleBtn.setAttribute("data-tip", "停止录制");
+    }
+    updateRecordingProgress(5, "录制中 00:00");
+    recordingProgressTimer = setInterval(() => {
+      const sec = (Date.now() - recordingStartAt) / 1000;
+      const pseudo = Math.min(95, 5 + sec * 1.5);
+      updateRecordingProgress(pseudo, `录制中 ${fmtRecordTime(sec)}`);
+    }, 250);
+    setStatus("正在录制网页（Alt+B 可结束）");
+  } catch (err) {
+    console.error(err);
+    stopRecordingTracks();
+    mediaRecorder = null;
+    resetRecordingUiToIdle("录制启动失败");
+    setStatus("录制启动失败，请允许屏幕捕获权限");
+  }
+}
+
+async function stopRecording() {
+  if (!mediaRecorder || mediaRecorder.state !== "recording") return;
+  updateRecordingProgress(98, "正在生成视频...");
+  mediaRecorder.stop();
+  mediaRecorder = null;
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  } catch {
+    // Ignore exit fullscreen errors.
+  }
+}
+
+async function toggleRecording() {
+  if (mediaRecorder && mediaRecorder.state === "recording") await stopRecording();
+  else await startRecording();
+}
 
 function applyLyricColors(textColor, fillColor) {
   document.documentElement.style.setProperty("--lyric-active-text", textColor);
@@ -738,6 +891,14 @@ lyricSaveBtn.addEventListener("click", () => {
 lyricModal.addEventListener("click", (e) => {
   if (e.target === lyricModal) lyricModal.classList.add("hidden");
 });
+recordToggleBtn.addEventListener("click", () => {
+  toggleRecording();
+});
+recordDownloadBtn.addEventListener("click", () => {
+  if (!recordingUrl) return;
+  downloadRecordingFile();
+  setStatus("已手动触发下载");
+});
 lyricsMaskEl.addEventListener("wheel", () => {
   lyricManualUntil = Date.now() + 3000;
 }, { passive: true });
@@ -797,6 +958,11 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "f" || e.key === "F") {
     e.preventDefault();
     fullBtn.click();
+    return;
+  }
+  if ((e.key === "b" || e.key === "B") && e.altKey) {
+    e.preventDefault();
+    toggleRecording();
     return;
   }
   if (e.key === "ArrowUp") {
@@ -870,6 +1036,7 @@ const savedFillColor = localStorage.getItem("mymusic_lyric_fill_color") || "#5aa
 lyricTextColorInput.value = savedTextColor;
 lyricFillColorInput.value = savedFillColor;
 applyLyricColors(savedTextColor, savedFillColor);
+resetRecordingUiToIdle();
 initAuth().then((ok) => {
   if (!ok) return;
   appReady = true;

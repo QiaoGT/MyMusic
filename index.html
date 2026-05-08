@@ -73,6 +73,18 @@
         <button id="lyric-save" class="icon text-btn">保存</button>
         <button id="lyric-cancel" class="icon text-btn">取消</button>
       </div>
+      <div class="recording-panel">
+        <div class="recording-head">网页录制</div>
+        <div class="recording-desc">点击录制或按 Alt+B 开始/结束录制，结束后自动下载。</div>
+        <div class="recording-buttons">
+          <button id="record-toggle" class="icon text-btn" data-tip="开始录制">开始录制</button>
+          <button id="record-download" class="icon text-btn" data-tip="下载录制" disabled>下载视频</button>
+        </div>
+        <div class="recording-progress-wrap">
+          <progress id="record-progress" value="0" max="100"></progress>
+          <span id="record-progress-text">未开始</span>
+        </div>
+      </div>
     </div>
   </div>
 

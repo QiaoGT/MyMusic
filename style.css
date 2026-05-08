@@ -258,6 +258,49 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   gap: 8px;
 }
 .text-btn { width: auto; padding: 0 14px; }
+.recording-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.recording-head {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.recording-desc {
+  margin-top: 6px;
+  color: var(--mute);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.recording-buttons {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#record-toggle, #record-download {
+  min-width: 110px;
+  height: 40px;
+  font-size: 0.88rem;
+}
+#record-download:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.recording-progress-wrap {
+  margin-top: 10px;
+  display: grid;
+  gap: 5px;
+}
+#record-progress {
+  width: 100%;
+  height: 10px;
+}
+#record-progress-text {
+  color: var(--mute);
+  font-size: 0.8rem;
+}
 .auth-overlay {
   position: fixed;
   inset: 0;
@@ -317,6 +360,22 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   }
   .bottom { grid-column: auto; width: 100%; }
   .vol { justify-self: start; }
+  .modal-card h3 {
+    padding-right: 0;
+    margin-bottom: 56px;
+  }
+  .modal-actions {
+    top: 42px;
+    right: 12px;
+    left: 12px;
+    justify-content: flex-end;
+  }
+  .recording-buttons {
+    flex-direction: column;
+  }
+  #record-toggle, #record-download {
+    width: 100%;
+  }
 }
 
 @keyframes bgDarkShift {
