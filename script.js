@@ -9,6 +9,7 @@
 
 const AUDIO_EXTS = [".mp3", ".flac", ".wav", ".m4a", ".ogg"];
 const COVER_EXTS = ["jpg", "jpeg", "png", "webp"];
+const LYRIC_EXTS = [".lrc", ".srt"];
 const PLAY_MODES = ["list", "single", "shuffle"];
 const PLAY_MODE_ICON = { list: "🔁", single: "🔂", shuffle: "🔀" };
 const PLAY_MODE_TEXT = { list: "顺序", single: "单曲", shuffle: "随机" };
@@ -48,6 +49,16 @@ const lyricCancelBtn = document.getElementById("lyric-cancel");
 const stageEl = document.getElementById("lyrics-stage");
 const lyricsMaskEl = document.querySelector(".lyrics-mask");
 const spectrumEl = document.getElementById("spectrum");
+const fullscreenSpectrumEl = document.getElementById("fullscreen-spectrum");
+const recordStatusEl = document.getElementById("record-status");
+const recordProgressEl = document.getElementById("record-progress");
+const recordStartBtn = document.getElementById("record-start");
+const recordStopBtn = document.getElementById("record-stop");
+const recordDownloadEl = document.getElementById("record-download");
+const authOverlayEl = document.getElementById("auth-overlay");
+const authInputEl = document.getElementById("auth-input");
+const authSubmitEl = document.getElementById("auth-submit");
+const authMsgEl = document.getElementById("auth-msg");
 
 let playlist = [];
 let lrcLines = [];
@@ -67,6 +78,12 @@ let gradientPhase = 0;
 let lyricManualUntil = 0;
 let fullscreenHideTimer = null;
 const uploadDateCache = new Map();
+let recorder = null;
+let recordStream = null;
+let recordChunks = [];
+let recordTimer = null;
+let fullscreenSpectrumTimer = null;
+let appReady = false;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -103,6 +120,33 @@ function parseLrc(text) {
     .filter((x) => Number.isFinite(x.time))
     .sort((a, b) => a.time - b.time);
   return parsed;
+}
+
+function parseSrt(text) {
+  const blocks = text.replace(/\r/g, "").split(/\n\s*\n/);
+  const out = [];
+  const toSec = (raw) => {
+    const m = raw.trim().match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    if (!m) return NaN;
+    return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4].padEnd(3, "0")) / 1000;
+  };
+
+  for (const block of blocks) {
+    const rows = block.split("\n").map((x) => x.trim()).filter(Boolean);
+    if (rows.length < 2) continue;
+    const timeline = rows.find((x) => x.includes("-->"));
+    if (!timeline) continue;
+    const [startRaw] = timeline.split("-->");
+    const start = toSec(startRaw || "");
+    if (!Number.isFinite(start)) continue;
+
+    const startIdx = rows.indexOf(timeline) + 1;
+    const lineText = rows.slice(startIdx).filter((x) => !/^\d+$/.test(x)).join(" ").trim();
+    if (!lineText) continue;
+    out.push({ time: start, text: lineText });
+  }
+
+  return out.sort((a, b) => a.time - b.time);
 }
 
 async function fetchGithubFolder(folder) {
@@ -147,9 +191,11 @@ function buildLookup(files) {
     if (p.startsWith(`/${CONFIG.imgFolder}/`)) {
       coverSet.add(p.slice(p.lastIndexOf("/") + 1).toLowerCase());
     }
-    if (p.startsWith(`/${CONFIG.lrcFolder}/`) && p.toLowerCase().endsWith(".lrc")) {
+    if (p.startsWith(`/${CONFIG.lrcFolder}/`) && LYRIC_EXTS.some((ext) => p.toLowerCase().endsWith(ext))) {
       const fn = p.slice(p.lastIndexOf("/") + 1);
-      lrcMap.set(normalizeName(baseName(fn)), fn);
+      const key = normalizeName(baseName(fn));
+      const prev = lrcMap.get(key);
+      if (!prev || fn.toLowerCase().endsWith(".lrc")) lrcMap.set(key, fn);
     }
   });
 }
@@ -339,14 +385,23 @@ function ensureAnalyser() {
 }
 
 function drawSpectrum() {
-  const ctx = spectrumEl.getContext("2d");
+  drawSpectrumOn(spectrumEl, 1);
+  if (document.fullscreenElement === stageEl) {
+    const dimmed = stageEl.classList.contains("spectrum-dim");
+    drawSpectrumOn(fullscreenSpectrumEl, dimmed ? 0.42 : 1);
+  }
+}
+
+function drawSpectrumOn(canvas, alphaFactor = 1) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const w = spectrumEl.clientWidth;
-  const h = spectrumEl.clientHeight;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
   const dpr = window.devicePixelRatio || 1;
-  if (spectrumEl.width !== Math.floor(w * dpr) || spectrumEl.height !== Math.floor(h * dpr)) {
-    spectrumEl.width = Math.floor(w * dpr);
-    spectrumEl.height = Math.floor(h * dpr);
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
@@ -355,7 +410,6 @@ function drawSpectrum() {
   const barW = Math.max(1.2, (w - gap * (bars - 1)) / bars);
   const half = Math.floor(bars / 2);
   if (!analyser || !freqData) {
-    // fallback animation when analyser is unavailable
     spectrumPhase += 0.08;
     for (let i = 0; i < half; i += 1) {
       const wave = (Math.sin(spectrumPhase + i * 0.35) + 1) / 2;
@@ -363,14 +417,13 @@ function drawSpectrum() {
       const xLeft = (half - 1 - i) * (barW + gap);
       const xRight = (half + i) * (barW + gap);
       const y = h - bh;
-      ctx.fillStyle = "rgba(237,244,255,.35)";
-      const rw = barW;
-      const rr = Math.min(6, rw / 2, bh / 2);
+      ctx.fillStyle = `rgba(237,244,255,${0.35 * alphaFactor})`;
+      const rr = Math.min(6, barW / 2, bh / 2);
       ctx.beginPath();
-      ctx.roundRect(xLeft, y, rw, bh, rr);
+      ctx.roundRect(xLeft, y, barW, bh, rr);
       ctx.fill();
       ctx.beginPath();
-      ctx.roundRect(xRight, y, rw, bh, rr);
+      ctx.roundRect(xRight, y, barW, bh, rr);
       ctx.fill();
     }
     return;
@@ -382,9 +435,10 @@ function drawSpectrum() {
   let energySum = 0;
   for (let i = 0; i < freqData.length; i += 1) energySum += freqData[i];
   const globalEnergy = energySum / (freqData.length * 255);
+
   for (let i = 0; i < half; i += 1) {
     const pos = half <= 1 ? 0 : i / (half - 1);
-    const mapped = Math.pow(pos, 1.15); // wider mapping so far-left/right also receive activity
+    const mapped = Math.pow(pos, 1.15);
     const binIndex = Math.min(freqData.length - 1, Math.floor(mapped * (freqData.length - 1)));
     const raw = freqData[binIndex] / 255;
     const sidePulse = 0.08 + 0.08 * (Math.sin(gradientPhase * 8 + i * 0.24) * 0.5 + 0.5);
@@ -397,18 +451,17 @@ function drawSpectrum() {
     const xLeft = (half - 1 - i) * (barW + gap);
     const xRight = (half + i) * (barW + gap);
     const y = h - bh;
-    const rw = barW;
-    const rr = Math.min(7, rw / 2, bh / 2);
+    const rr = Math.min(7, barW / 2, bh / 2);
     const t = (i / half + gradientPhase) % 1;
-    const hue = 210 + 110 * t; // blue -> cyan -> gold-ish
+    const hue = 210 + 110 * t;
     const sat = 92 - 20 * Math.abs(t - 0.5);
     const light = 60 + 10 * Math.sin((t + gradientPhase) * Math.PI * 2);
-    ctx.fillStyle = `hsl(${hue} ${sat}% ${light}%)`;
+    ctx.fillStyle = `hsla(${hue} ${sat}% ${light}% / ${alphaFactor})`;
     ctx.beginPath();
-    ctx.roundRect(xLeft, y, rw, bh, rr);
+    ctx.roundRect(xLeft, y, barW, bh, rr);
     ctx.fill();
     ctx.beginPath();
-    ctx.roundRect(xRight, y, rw, bh, rr);
+    ctx.roundRect(xRight, y, barW, bh, rr);
     ctx.fill();
   }
 }
@@ -457,7 +510,13 @@ async function fetchLyrics(url) {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error("歌词不存在");
-    lrcLines = parseLrc(await res.text());
+    const raw = await res.text();
+    if (url.toLowerCase().endsWith(".srt")) lrcLines = parseSrt(raw);
+    else lrcLines = parseLrc(raw);
+    if (!lrcLines.length) {
+      lrcLines = parseSrt(raw);
+      if (!lrcLines.length) lrcLines = parseLrc(raw);
+    }
     renderLyrics();
     setStatus("歌词已匹配");
   } catch {
@@ -626,8 +685,11 @@ document.addEventListener("fullscreenchange", () => {
   fullBtn.setAttribute("data-tip", on ? "退出全屏" : "歌词全屏");
   if (!on) {
     stageEl.classList.remove("controls-hidden");
+    stageEl.classList.remove("spectrum-dim");
     if (fullscreenHideTimer) clearTimeout(fullscreenHideTimer);
+    if (fullscreenSpectrumTimer) clearTimeout(fullscreenSpectrumTimer);
     fullscreenHideTimer = null;
+    fullscreenSpectrumTimer = null;
   } else {
     restartFullscreenHideTimer();
   }
@@ -637,6 +699,11 @@ function restartFullscreenHideTimer() {
   if (!document.fullscreenElement) return;
   if (fullscreenHideTimer) clearTimeout(fullscreenHideTimer);
   stageEl.classList.remove("controls-hidden");
+  stageEl.classList.add("spectrum-dim");
+  if (fullscreenSpectrumTimer) clearTimeout(fullscreenSpectrumTimer);
+  fullscreenSpectrumTimer = setTimeout(() => {
+    stageEl.classList.remove("spectrum-dim");
+  }, 5000);
   fullscreenHideTimer = setTimeout(() => {
     stageEl.classList.add("controls-hidden");
   }, 5000);
@@ -678,13 +745,136 @@ lyricsEl.addEventListener("click", (e) => {
   lyricManualUntil = Date.now() + 1200;
 });
 
+function resetRecordUi() {
+  recordStatusEl.textContent = "未开始";
+  recordProgressEl.style.width = "0%";
+  recordDownloadEl.classList.add("disabled");
+  recordDownloadEl.removeAttribute("href");
+}
+
+function stopRecording() {
+  if (!recorder || recorder.state !== "recording") return;
+  recorder.stop();
+  if (recordStream) {
+    recordStream.getTracks().forEach((t) => t.stop());
+    recordStream = null;
+  }
+}
+
+function startRecording() {
+  if (!audio.src) {
+    setStatus("请先播放歌曲");
+    return;
+  }
+  if (recorder && recorder.state === "recording") return;
+  const stream = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
+  if (!stream || typeof MediaRecorder === "undefined") {
+    setStatus("当前浏览器不支持录制");
+    return;
+  }
+  recordStream = stream;
+  recordChunks = [];
+  recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+  recordStatusEl.textContent = "录制中...";
+  recordProgressEl.style.width = "0%";
+  recordDownloadEl.classList.add("disabled");
+  recorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
+  };
+  recorder.onstop = () => {
+    if (recordTimer) clearInterval(recordTimer);
+    const blob = new Blob(recordChunks, { type: recorder.mimeType || "audio/webm" });
+    const songName = playlist[currentIndex]?.name || "recorded-song";
+    const url = URL.createObjectURL(blob);
+    recordDownloadEl.href = url;
+    recordDownloadEl.download = `${songName}.webm`;
+    recordDownloadEl.classList.remove("disabled");
+    recordStatusEl.textContent = "录制完成，可下载";
+    recordProgressEl.style.width = "100%";
+  };
+  recorder.start(250);
+  if (recordTimer) clearInterval(recordTimer);
+  recordTimer = setInterval(() => {
+    if (!audio.duration) return;
+    const ratio = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
+    recordProgressEl.style.width = `${ratio * 100}%`;
+    if (audio.currentTime >= audio.duration - 0.05) stopRecording();
+  }, 150);
+}
+
+async function checkAuthRequired() {
+  try {
+    const res = await fetch("/api/config");
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.passwordRequired;
+  } catch {
+    return false;
+  }
+}
+
+async function verifyPassword(password) {
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function initAuth() {
+  const required = await checkAuthRequired();
+  if (!required) return true;
+  if (sessionStorage.getItem("mymusic_auth_ok") === "1") return true;
+  authOverlayEl.classList.remove("hidden");
+  return false;
+}
+
+recordStartBtn.addEventListener("click", startRecording);
+recordStopBtn.addEventListener("click", stopRecording);
+window.addEventListener("keydown", (e) => {
+  if (e.altKey && (e.key === "b" || e.key === "B")) {
+    e.preventDefault();
+    if (recorder && recorder.state === "recording") stopRecording();
+    else startRecording();
+  }
+});
+authSubmitEl.addEventListener("click", async () => {
+  const ok = await verifyPassword(authInputEl.value || "");
+  if (!ok) {
+    authMsgEl.textContent = "密码错误";
+    return;
+  }
+  sessionStorage.setItem("mymusic_auth_ok", "1");
+  authOverlayEl.classList.add("hidden");
+  authMsgEl.textContent = "";
+  if (!appReady) {
+    appReady = true;
+    loadPlaylist();
+  }
+});
+authInputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") authSubmitEl.click();
+});
+
 setModeIcon();
 setPlayIcon(true);
 coverEl.src = DEFAULT_COVER;
 audio.volume = 1;
+resetRecordUi();
 const savedTextColor = localStorage.getItem("mymusic_lyric_text_color") || "#ffffff";
 const savedFillColor = localStorage.getItem("mymusic_lyric_fill_color") || "#5aa2ff";
 lyricTextColorInput.value = savedTextColor;
 lyricFillColorInput.value = savedFillColor;
 applyLyricColors(savedTextColor, savedFillColor);
-loadPlaylist();
+initAuth().then((ok) => {
+  if (!ok) return;
+  appReady = true;
+  loadPlaylist();
+});

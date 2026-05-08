@@ -40,6 +40,7 @@
       <div class="lyrics-mask">
         <div id="lyrics"><p>正在加载歌曲...</p></div>
       </div>
+      <canvas id="fullscreen-spectrum" height="82"></canvas>
     </main>
 
     <aside class="panel right">
@@ -68,10 +69,32 @@
       <input id="lyric-text-color" type="color" value="#ffffff" />
       <label class="color-label" for="lyric-fill-color">逐字高亮颜色</label>
       <input id="lyric-fill-color" type="color" value="#5aa2ff" />
+      <div class="record-box">
+        <div class="record-head">
+          <strong>歌曲录制</strong>
+          <span id="record-hotkey">ALT+B</span>
+        </div>
+        <div id="record-status">未开始</div>
+        <div id="record-progress-wrap"><div id="record-progress"></div></div>
+        <div class="record-actions">
+          <button id="record-start" class="icon text-btn">开始</button>
+          <button id="record-stop" class="icon text-btn">停止</button>
+          <a id="record-download" class="icon text-btn disabled" download>下载</a>
+        </div>
+      </div>
       <div class="modal-actions">
         <button id="lyric-save" class="icon text-btn">保存</button>
         <button id="lyric-cancel" class="icon text-btn">取消</button>
       </div>
+    </div>
+  </div>
+
+  <div id="auth-overlay" class="auth-overlay hidden">
+    <div class="auth-card">
+      <h3>请输入访问密码</h3>
+      <input id="auth-input" type="password" placeholder="Password" />
+      <button id="auth-submit" class="icon text-btn">进入</button>
+      <p id="auth-msg"></p>
     </div>
   </div>
 
