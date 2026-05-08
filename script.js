@@ -86,6 +86,7 @@ let fullscreenSpectrumTimer = null;
 let appReady = false;
 let ffmpegEngine = null;
 let ffmpegLoading = null;
+let displayTrackStopHandler = null;
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -765,6 +766,7 @@ function stopRecording() {
     recordStream.getTracks().forEach((t) => t.stop());
     recordStream = null;
   }
+  displayTrackStopHandler = null;
 }
 
 async function ensureFfmpeg() {
@@ -816,32 +818,37 @@ function startRecording() {
   }
   if (recorder && recorder.state === "recording") return;
   const stream = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
-  if (!stream || typeof MediaRecorder === "undefined") {
+  if (!stream || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
     setStatus("当前浏览器不支持录制");
     return;
   }
-  const visualSource = document.fullscreenElement === stageEl ? fullscreenSpectrumEl : spectrumEl;
-  const visualStream = visualSource && visualSource.captureStream ? visualSource.captureStream(30) : null;
-  if (!visualStream) {
-    setStatus("当前浏览器不支持视频录制");
-    return;
-  }
-  const mixed = new MediaStream();
-  visualStream.getVideoTracks().forEach((t) => mixed.addTrack(t));
-  stream.getAudioTracks().forEach((t) => mixed.addTrack(t));
-  recordStream = mixed;
-  recordChunks = [];
-  const mp4Mime = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
-  const webmMime = "video/webm;codecs=vp9,opus";
-  const pickedMime = MediaRecorder.isTypeSupported(mp4Mime) ? mp4Mime : (MediaRecorder.isTypeSupported(webmMime) ? webmMime : "");
-  recorder = pickedMime ? new MediaRecorder(mixed, { mimeType: pickedMime }) : new MediaRecorder(mixed);
-  recordStatusEl.textContent = "录制中...";
-  recordProgressEl.style.width = "0%";
-  recordDownloadEl.classList.add("disabled");
-  recorder.ondataavailable = (ev) => {
-    if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
-  };
-  recorder.onstop = async () => {
+  (async () => {
+    let displayStream = null;
+    try {
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: true
+      });
+    } catch {
+      setStatus("你取消了网页录制授权");
+      return;
+    }
+    const mixed = new MediaStream();
+    displayStream.getVideoTracks().forEach((t) => mixed.addTrack(t));
+    stream.getAudioTracks().forEach((t) => mixed.addTrack(t));
+    recordStream = mixed;
+    recordChunks = [];
+    const mp4Mime = "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
+    const webmMime = "video/webm;codecs=vp9,opus";
+    const pickedMime = MediaRecorder.isTypeSupported(mp4Mime) ? mp4Mime : (MediaRecorder.isTypeSupported(webmMime) ? webmMime : "");
+    recorder = pickedMime ? new MediaRecorder(mixed, { mimeType: pickedMime }) : new MediaRecorder(mixed);
+    recordStatusEl.textContent = "网页全屏录制中...";
+    recordProgressEl.style.width = "0%";
+    recordDownloadEl.classList.add("disabled");
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) recordChunks.push(ev.data);
+    };
+    recorder.onstop = async () => {
     if (recordTimer) clearInterval(recordTimer);
     const songName = playlist[currentIndex]?.name || "recorded-song";
     const rawBlob = new Blob(recordChunks, { type: recorder.mimeType || "video/webm" });
@@ -864,15 +871,21 @@ function startRecording() {
       recordStatusEl.textContent = "MP4转码失败，请重试";
       setStatus("MP4转码失败，建议在Chrome最新版重试");
     }
-  };
-  recorder.start(250);
-  if (recordTimer) clearInterval(recordTimer);
-  recordTimer = setInterval(() => {
+    };
+    const displayTrack = displayStream.getVideoTracks()[0];
+    if (displayTrack) {
+      displayTrackStopHandler = () => stopRecording();
+      displayTrack.onended = displayTrackStopHandler;
+    }
+    recorder.start(250);
+    if (recordTimer) clearInterval(recordTimer);
+    recordTimer = setInterval(() => {
     if (!audio.duration) return;
     const ratio = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
     recordProgressEl.style.width = `${ratio * 100}%`;
     if (audio.currentTime >= audio.duration - 0.05) stopRecording();
-  }, 150);
+    }, 150);
+  })();
 }
 
 async function checkAuthRequired() {
