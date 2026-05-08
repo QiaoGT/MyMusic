@@ -15,11 +15,11 @@ body {
   font-family: "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(1200px 700px at 10% -10%, rgba(47, 118, 255, 0.38) 0%, rgba(7, 11, 20, 0) 60%),
-    radial-gradient(900px 520px at 92% 115%, rgba(54, 255, 214, 0.28) 0%, rgba(7, 11, 20, 0) 62%),
-    linear-gradient(120deg, #04070d 0%, #091020 35%, #060b14 70%, #04070d 100%);
-  background-size: 130% 130%, 130% 130%, 200% 200%;
-  animation: bgDriftA 18s ease-in-out infinite, bgDriftB 24s ease-in-out infinite, bgFlow 22s linear infinite;
+    radial-gradient(1200px 700px at 15% -10%, rgba(255, 255, 255, 0.07) 0%, rgba(7, 11, 20, 0) 58%),
+    radial-gradient(1000px 560px at 90% 120%, rgba(255, 255, 255, 0.05) 0%, rgba(7, 11, 20, 0) 60%),
+    linear-gradient(130deg, #020304 0%, #050608 35%, #08090b 70%, #020304 100%);
+  background-size: 120% 120%, 120% 120%, 180% 180%;
+  animation: bgDarkShift 26s ease-in-out infinite;
   overflow: hidden;
 }
 .noise {
@@ -30,18 +30,18 @@ body {
   background-image: radial-gradient(rgba(255,255,255,.55) 0.4px, transparent 0.4px);
   background-size: 3px 3px;
 }
-.glow { position: fixed; width: 42vw; height: 42vw; border-radius: 50%; filter: blur(82px); pointer-events: none; }
+.glow { position: fixed; width: 42vw; height: 42vw; border-radius: 50%; filter: blur(90px); pointer-events: none; }
 .glow-a {
   left: -10vw;
   top: -14vw;
-  background: rgba(80, 126, 255, 0.26);
-  animation: orbA 16s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.06);
+  animation: orbA 22s ease-in-out infinite;
 }
 .glow-b {
   right: -12vw;
   bottom: -20vw;
-  background: rgba(77, 241, 198, 0.24);
-  animation: orbB 19s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.05);
+  animation: orbB 24s ease-in-out infinite;
 }
 
 .layout {
@@ -267,20 +267,10 @@ h1 { margin: 4px 0 0; font-size: 1.25rem; }
   .vol { justify-self: start; }
 }
 
-@keyframes bgFlow {
+@keyframes bgDarkShift {
   0% { background-position: 0% 0%, 100% 100%, 0% 50%; }
-  50% { background-position: 10% 4%, 90% 96%, 100% 50%; }
+  50% { background-position: 8% 4%, 92% 96%, 100% 50%; }
   100% { background-position: 0% 0%, 100% 100%, 0% 50%; }
-}
-@keyframes bgDriftA {
-  0% { background-size: 130% 130%, 130% 130%, 200% 200%; }
-  50% { background-size: 150% 145%, 125% 120%, 220% 220%; }
-  100% { background-size: 130% 130%, 130% 130%, 200% 200%; }
-}
-@keyframes bgDriftB {
-  0% { filter: saturate(1) brightness(1); }
-  50% { filter: saturate(1.15) brightness(1.04); }
-  100% { filter: saturate(1) brightness(1); }
 }
 @keyframes orbA {
   0% { transform: translate3d(0, 0, 0) scale(1); }

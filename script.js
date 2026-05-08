@@ -41,7 +41,6 @@ const lyricSettingsBtn = document.getElementById("btn-lyric-settings");
 const lyricModal = document.getElementById("lyric-modal");
 const lyricTextColorInput = document.getElementById("lyric-text-color");
 const lyricFillColorInput = document.getElementById("lyric-fill-color");
-const bgLinkInput = document.getElementById("bg-link-input");
 const lyricSaveBtn = document.getElementById("lyric-save");
 const lyricCancelBtn = document.getElementById("lyric-cancel");
 const stageEl = document.getElementById("lyrics-stage");
@@ -85,22 +84,6 @@ function setStatus(msg) { statusEl.textContent = msg; }
 function applyLyricColors(textColor, fillColor) {
   document.documentElement.style.setProperty("--lyric-active-text", textColor);
   document.documentElement.style.setProperty("--lyric-fill-color", fillColor);
-}
-
-function applyBackgroundFromUrl(url) {
-  const clean = (url || "").trim();
-  if (!clean) {
-    document.body.style.backgroundImage = "";
-    localStorage.removeItem("mymusic_bg_link");
-    setStatus("已恢复默认背景");
-    return;
-  }
-  document.body.style.backgroundImage = `linear-gradient(rgba(4,7,12,.58), rgba(4,7,12,.58)), url("${clean}")`;
-  document.body.style.backgroundSize = "cover";
-  document.body.style.backgroundPosition = "center";
-  document.body.style.backgroundRepeat = "no-repeat";
-  localStorage.setItem("mymusic_bg_link", clean);
-  setStatus("自定义背景已应用");
 }
 
 function parseLrc(text) {
@@ -592,9 +575,7 @@ lyricCancelBtn.addEventListener("click", () => {
 lyricSaveBtn.addEventListener("click", () => {
   const textColor = lyricTextColorInput.value || "#ffffff";
   const fillColor = lyricFillColorInput.value || "#5aa2ff";
-  const bgLink = bgLinkInput.value || "";
   applyLyricColors(textColor, fillColor);
-  applyBackgroundFromUrl(bgLink);
   localStorage.setItem("mymusic_lyric_text_color", textColor);
   localStorage.setItem("mymusic_lyric_fill_color", fillColor);
   lyricModal.classList.add("hidden");
@@ -625,7 +606,4 @@ const savedFillColor = localStorage.getItem("mymusic_lyric_fill_color") || "#5aa
 lyricTextColorInput.value = savedTextColor;
 lyricFillColorInput.value = savedFillColor;
 applyLyricColors(savedTextColor, savedFillColor);
-const savedBgLink = localStorage.getItem("mymusic_bg_link") || "";
-bgLinkInput.value = savedBgLink;
-if (savedBgLink) applyBackgroundFromUrl(savedBgLink);
 loadPlaylist();
