@@ -11,6 +11,7 @@ const AUDIO_EXTS = [".mp3", ".flac", ".wav", ".m4a", ".ogg"];
 const COVER_EXTS = ["jpg", "jpeg", "png", "webp"];
 const rawBase = `https://raw.githubusercontent.com/${CONFIG.user}/${CONFIG.repo}/${CONFIG.branch}`;
 const apiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/${CONFIG.musicFolder}`;
+const imgApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/${CONFIG.imgFolder}`;
 
 const DEFAULT_COVER =
   "data:image/svg+xml;charset=UTF-8," +
@@ -25,6 +26,7 @@ let lrcLines = [];
 let activeLyricIndex = -1;
 let playMode = "list";
 let rafId = 0;
+let coverSet = new Set();
 
 const audio = document.getElementById("audio-element");
 const musicListEl = document.getElementById("music-list");
@@ -52,7 +54,7 @@ function baseNameFromFile(fileName) {
 }
 
 function parseLrc(text) {
-  return text
+  const parsed = text
     .split(/\r?\n/)
     .flatMap((line) => {
       const content = line.replace(/\[[^\]]*\]/g, "").trim();
@@ -64,23 +66,38 @@ function parseLrc(text) {
     })
     .filter((v) => Number.isFinite(v.time))
     .sort((a, b) => a.time - b.time);
+
+  if (!parsed.length) return parsed;
+  const shift = parsed[0].time;
+  if (shift > 1) {
+    return parsed.map((line) => ({ ...line, time: Math.max(0, line.time - shift) }));
+  }
+  return parsed;
 }
 
-async function exists(url) {
+async function fetchCoverIndex() {
   try {
-    const res = await fetch(url, { method: "HEAD" });
-    return res.ok;
+    const response = await fetch(imgApiBase);
+    if (!response.ok) return;
+    const files = await response.json();
+    coverSet = new Set(
+      files
+        .filter((file) => file.type === "file")
+        .map((file) => file.name.toLowerCase())
+    );
   } catch {
-    return false;
+    coverSet = new Set();
   }
 }
 
-async function resolveCover(baseName) {
-  const candidates = [baseName, `${baseName}-cover`];
+function resolveCover(baseName) {
+  const candidates = [`${baseName}-cover`, baseName];
   for (const ext of COVER_EXTS) {
     for (const fileBase of candidates) {
-      const url = `${rawBase}/${CONFIG.imgFolder}/${encodeURIComponent(fileBase)}.${ext}`;
-      if (await exists(url)) return url;
+      const fileName = `${fileBase}.${ext}`;
+      if (coverSet.has(fileName.toLowerCase())) {
+        return `${rawBase}/${CONFIG.imgFolder}/${encodeURIComponent(fileName)}`;
+      }
     }
   }
   return DEFAULT_COVER;
@@ -102,7 +119,8 @@ function renderLyrics() {
     lyricWrapper.innerHTML = "<p>暂无歌词</p>";
     return;
   }
-  lyricWrapper.innerHTML = lrcLines
+  const intro = `<p><span class="lyric-line"><span class="line">♪ 前奏 ♪</span><span class="fill">♪ 前奏 ♪</span></span></p>`;
+  lyricWrapper.innerHTML = intro + lrcLines
     .map((line) => `<p><span class="lyric-line"><span class="line">${safeText(line.text)}</span><span class="fill">${safeText(line.text)}</span></span></p>`)
     .join("");
 }
@@ -118,15 +136,15 @@ function updateLyricFlow() {
     const items = lyricWrapper.querySelectorAll("p");
     items.forEach((el) => el.classList.remove("active"));
     lyricWrapper.querySelectorAll(".fill").forEach((fillEl, i) => {
-      fillEl.style.width = i < idx ? "100%" : "0%";
+      fillEl.style.width = i <= idx ? "100%" : "0%";
     });
-    if (items[idx]) {
-      items[idx].classList.add("active");
-      lyricWrapper.style.transform = `translateY(${-idx * 56 + 170}px)`;
+    if (items[idx + 1]) {
+      items[idx + 1].classList.add("active");
+      lyricWrapper.style.transform = `translateY(${-(idx + 1) * 56 + 170}px)`;
     }
   }
 
-  const item = lyricWrapper.querySelectorAll("p")[idx];
+  const item = lyricWrapper.querySelectorAll("p")[idx + 1];
   if (!item) return;
   const fill = item.querySelector(".fill");
   const txt = lrcLines[idx].text || "";
@@ -134,8 +152,7 @@ function updateLyricFlow() {
   const end = lrcLines[idx + 1] ? lrcLines[idx + 1].time : start + 3;
   const duration = Math.max(0.6, end - start);
   const ratio = Math.max(0, Math.min(1, (cur - start) / duration));
-  const chars = Math.floor(txt.length * ratio);
-  fill.style.width = `${(chars / Math.max(1, txt.length)) * 100}%`;
+  fill.style.width = `${ratio * 100}%`;
 }
 
 function stepFrame() {
@@ -186,7 +203,7 @@ async function loadSong(index, autoplay = true) {
 
   audio.src = song.url;
   document.getElementById("current-title").textContent = song.name;
-  const coverUrl = await resolveCover(song.name);
+  const coverUrl = resolveCover(song.name);
   document.getElementById("current-cover").src = coverUrl;
   document.getElementById("bg-blur").style.backgroundImage = `url(${coverUrl})`;
   await fetchLyrics(song.lrc);
@@ -211,6 +228,7 @@ async function fetchPlaylist() {
   setStatus("正在拉取 GitHub 音乐列表...");
   lyricWrapper.innerHTML = "<p>正在拉取 GitHub 音乐列表...</p>";
   try {
+    await fetchCoverIndex();
     const response = await fetch(apiBase);
     if (!response.ok) throw new Error(`GitHub API 访问失败: ${response.status}`);
     const files = await response.json();
