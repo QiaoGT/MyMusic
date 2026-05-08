@@ -15,6 +15,7 @@ const PLAY_MODE_TEXT = { list: "顺序", single: "单曲", shuffle: "随机" };
 
 const cdn = `https://cdn.jsdelivr.net/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}`;
 const flatApi = `https://data.jsdelivr.com/v1/package/gh/${CONFIG.user}/${CONFIG.repo}@${CONFIG.branch}/flat`;
+const commitsApiBase = `https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/commits`;
 
 const DEFAULT_COVER =
   "data:image/svg+xml;charset=UTF-8," +
@@ -64,6 +65,7 @@ let spectrumSmooth = [];
 let gradientPhase = 0;
 let lyricManualUntil = 0;
 let fullscreenHideTimer = null;
+const uploadDateCache = new Map();
 
 function safeText(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -275,8 +277,24 @@ function formatUploadDate(isoTime) {
   } else {
     d = new Date(isoTime);
   }
-  if (Number.isNaN(d.getTime())) return "上传时间未知";
+  if (Number.isNaN(d.getTime())) return "日期未知";
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function fetchCommitDateForMusicFile(fileName) {
+  if (uploadDateCache.has(fileName)) return uploadDateCache.get(fileName);
+  const path = `${CONFIG.musicFolder}/${fileName}`;
+  const url = `${commitsApiBase}?path=${encodeURIComponent(path)}&sha=${CONFIG.branch}&per_page=1`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return "";
+    const commits = await res.json();
+    const commitDate = commits?.[0]?.commit?.author?.date || commits?.[0]?.commit?.committer?.date || "";
+    uploadDateCache.set(fileName, commitDate);
+    return commitDate;
+  } catch {
+    return "";
+  }
 }
 
 function ensureAnalyser() {
@@ -335,10 +353,15 @@ function drawSpectrum() {
   if (spectrumSmooth.length !== half) spectrumSmooth = new Array(half).fill(0);
   gradientPhase += 0.0025;
   for (let i = 0; i < half; i += 1) {
-    const binIndex = Math.min(freqData.length - 1, Math.floor((i / half) * freqData.length));
+    const pos = half <= 1 ? 0 : i / (half - 1);
+    const mapped = Math.pow(pos, 1.5); // spread low-mid frequencies across the full width
+    const binIndex = Math.min(freqData.length - 1, Math.floor(mapped * (freqData.length - 1)));
     const raw = freqData[binIndex] / 255;
-    spectrumSmooth[i] = spectrumSmooth[i] * 0.72 + raw * 0.28;
-    const bh = Math.max(2, spectrumSmooth[i] * h);
+    const lifted = raw * 0.88 + (1 - pos) * 0.12; // keep both sides alive while center remains stronger
+    const boosted = Math.pow(Math.max(0, Math.min(1, lifted)), 0.58);
+    spectrumSmooth[i] = spectrumSmooth[i] * 0.68 + boosted * 0.32;
+    const minBar = h * 0.09;
+    const bh = Math.max(minBar, spectrumSmooth[i] * h);
     const xLeft = (half - 1 - i) * (barW + gap);
     const xRight = (half + i) * (barW + gap);
     const y = h - bh;
@@ -466,9 +489,26 @@ async function loadPlaylist() {
           url: `${cdn}/${CONFIG.musicFolder}/${encodeURIComponent(fn)}`,
           lrcUrl: lrcResolved.url,
           lrcFileName: lrcResolved.fileName,
+          fileName: fn,
           uploadedAt: entry.time
         };
       });
+
+    // Always prefer each song file's latest commit date from GitHub.
+    await Promise.all(
+      playlist.map(async (song) => {
+        const commitDate = await fetchCommitDateForMusicFile(song.fileName);
+        if (commitDate) {
+          song.uploadedAt = commitDate;
+          return;
+        }
+        const formatted = formatUploadDate(song.uploadedAt);
+        const year = Number(formatted.slice(0, 4));
+        if (formatted === "日期未知" || !Number.isFinite(year) || year < 2000 || year > 2100) {
+          song.uploadedAt = "";
+        }
+      })
+    );
 
     renderList();
     if (!playlist.length) {
