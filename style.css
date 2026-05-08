@@ -100,10 +100,10 @@ h1 { margin: 14px 0 6px; font-size: 1.2rem; }
   width: 0%;
   overflow: hidden;
   white-space: nowrap;
-  background: linear-gradient(90deg, #79f3cb, #38bdf8);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  transition: width 0.08s linear;
 }
 #lyric-wrapper p.active {
   opacity: 1;
